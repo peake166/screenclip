@@ -1,0 +1,21 @@
+Snapzy source attribution
+Upstream: https://github.com/andynvt/snapzy
+Pinned revision: dec0e794503c3595ee2fe3462aafe5effa70f966
+License: BSD-3-Clause (see Snapzy-LICENSE.txt)
+
+Sources/SnapzyScrollingCaptureStitcher.swift is adapted from:
+Snapzy/Services/Capture/ScrollingCapture/ScrollingCaptureStitcher.swift
+Upstream SHA256: eb8496f5512151d307dae0d35e28f4ae7b3778a6b8846aa8fdcee987c59a22f9
+The checksum identifies the unmodified upstream source, not the local file.
+Local changes preserve the first top margin and last accepted bottom margin
+once during export, include those margins in the full output-height budget,
+and stop before a segment that cannot fit in full (rather than skipping content
+by accepting only its tail). ContentSlice independently stores only its useful
+pixel rows; the full first and last rasters remain available for matching.
+The alignment search, Vision estimation and scoring rules remain upstream code.
+
+Sources/ScopedScrollFrameSource.swift adapts:
+Snapzy/Services/Capture/ScrollingCapture/ScrollingCaptureFrameSource.swift
+Changes: accepts prepared filter/configuration directly; session-local receiver and
+rate state; explicit cancellation/stop identity guards; 15 FPS decoded publishing.
+No capture audio, network, third-party runtime or new system permission is added.

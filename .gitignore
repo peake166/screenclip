@@ -1,0 +1,53 @@
+# macOS / editors
+.DS_Store
+._*
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build and distribution artifacts
+.build/
+/dist/
+/outputs/
+DerivedData/
+*.app/
+*.dSYM/
+*.o
+*.swiftmodule
+*.swiftdoc
+*.swiftsourceinfo
+*.zip
+*.dmg
+*.pkg
+
+# Local diagnostics and generated test/benchmark output; keep source fixtures
+/logs/
+/captures/
+/diagnostics/
+/benchmark/
+/benchmarks/
+/Evidence/
+/previews/
+/fixtures/generated/
+/Tests/generated/
+*.log
+
+# Secrets, certificates and personal configuration
+.env
+.env.*
+!.env.example
+*.keychain
+*.keychain-db
+*.p12
+*.pfx
+*.pem
+*.key
+*.cer
+*.cert
+*.mobileprovision
+*.provisionprofile
+*.local.json
+*.local.plist
+/personal/
+/local/

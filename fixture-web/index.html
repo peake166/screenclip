@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><title>截图连续性测试</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#fff;color:#16202a;font:16px -apple-system,BlinkMacSystemFont,sans-serif}header{padding:20px 28px;background:#fff;border-bottom:1px solid #dce2e8}h1{font-size:20px;margin:0 0 8px}p{margin:0;color:#576271}main{padding:0 24px}.row{height:96px;padding:14px 18px;border-bottom:1px solid #dde3e8}.title{font:600 20px ui-monospace,monospace;white-space:nowrap;margin-bottom:9px}.body{font-size:14px}.mark{float:right;font-size:24px}
+</style>
+<header><h1>长截图测试：检查连续行号</h1><p>本地测试内容，每行有唯一编号和颜色。</p></header><main id="rows"></main>
+<script>
+const root=document.querySelector('main');
+for(let i=0;i<80;i++){const e=document.createElement('section');e.className='row';e.style.background=`hsl(${i*29%360} 68% ${i%2?95:91}%)`;e.innerHTML=`<div class="title">ROW ${String(i).padStart(2,'0')} <span class="mark">${String(i*137+31).padStart(4,'0')}</span></div><div class="body">连续截图测试，第 ${i+1} 行。颜色和编号用于检查漏行与重复。</div>`;root.append(e)}
+</script>
