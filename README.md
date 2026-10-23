@@ -2,6 +2,16 @@
 
 一个常驻 macOS 菜单栏的轻量截图工具：框选后直接复制、滚动长截图，以及在原截图位置显示译文。
 
+## 下载与安装
+
+[下载安装包（DMG）](https://github.com/peake166/screenclip/releases/latest/download/ScreenClip-macOS-universal.dmg) · [下载压缩包（ZIP）](https://github.com/peake166/screenclip/releases/latest/download/ScreenClip-macOS-universal.zip) · [全部版本](https://github.com/peake166/screenclip/releases)
+
+打开 DMG，将「截图助手.app」拖入「Applications / 应用程序」，再从应用程序中打开。ZIP 解压后同样将应用移入「应用程序」。安装包内附首次使用说明，无需 Xcode。
+
+**当前公开包未经 Apple 公证。** 首次打开时 macOS 可能拦截；确认来自本仓库后，可按 [Apple 官方说明](https://support.apple.com/zh-cn/102445)，在「系统设置 → 隐私与安全性」中为截图助手选择「仍要打开」。无需关闭 Gatekeeper 或运行解除隔离的命令。若系统明确报告恶意软件或禁止运行，请停止安装。
+
+通用包包含 Apple Silicon（arm64）和 Intel（x86_64）架构。当前已在 Apple Silicon Mac 验证，尚未在 Intel Mac 实机验证。下载页附 SHA-256 校验值。安装包不包含 API Key 或任何个人配置，云翻译需自行填写密钥。
+
 ## 功能
 
 - **截图并复制**：框选区域后写入剪贴板，切换到其他应用即可粘贴。
@@ -47,6 +57,12 @@
 ```
 
 生成的应用位于 `dist/截图助手.app`。默认构建当前机器架构，可将生成的应用移入「应用程序」后运行。签名行为和可选参数见 [build.sh](build.sh)；本项目不提供已公证的发行承诺。自行构建、更换签名或移动应用后，可能需要重新授予屏幕录制权限。
+
+构建与公开包相同的通用架构应用，并使用临时签名：
+
+```sh
+SCREENCLIP_UNIVERSAL=1 SCREENCLIP_SIGN_IDENTITY=- ./build.sh
+```
 
 ```sh
 ./test.sh

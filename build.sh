@@ -2,9 +2,21 @@
 set -eu
 cd "${0:A:h}"
 mkdir -p .build/App/Contents/MacOS .build/App/Contents/Resources .build/AppIcon.iconset
-xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framework AppKit -framework ScreenCaptureKit -framework Carbon -framework SwiftUI -framework Translation -framework Vision -framework NaturalLanguage -framework Security -framework ServiceManagement \
-  Sources/*.swift \
-  -o .build/App/Contents/MacOS/ScreenClip
+if [[ "${SCREENCLIP_UNIVERSAL:-0}" == "1" ]]; then
+  screenclip_architectures=(arm64 x86_64)
+else
+  screenclip_architectures=("$(uname -m)")
+fi
+screenclip_binaries=()
+for screenclip_arch in "${screenclip_architectures[@]}"; do
+  screenclip_binary=".build/ScreenClip-${screenclip_arch}"
+  xcrun swiftc -O -swift-version 5 -target "${screenclip_arch}-apple-macos14.0" \
+    -file-prefix-map "$PWD=." -debug-prefix-map "$PWD=." \
+    -framework AppKit -framework ScreenCaptureKit -framework Carbon -framework SwiftUI -framework Translation -framework Vision -framework NaturalLanguage -framework Security -framework ServiceManagement \
+    Sources/*.swift -o "$screenclip_binary"
+  screenclip_binaries+=("$screenclip_binary")
+done
+xcrun lipo -create "${screenclip_binaries[@]}" -output .build/App/Contents/MacOS/ScreenClip
 for icon_size in 16 32 128 256 512; do
   sips -z "$icon_size" "$icon_size" Assets/AppIcon.png --out ".build/AppIcon.iconset/icon_${icon_size}x${icon_size}.png" >/dev/null
   icon_retina=$((icon_size * 2))
