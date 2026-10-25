@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import ScreenCaptureKit
 import CoreMedia
 import OSLog
@@ -128,10 +129,26 @@ final class SelectionController {
     private var windows: [NSWindow] = []
     private var completion: ((CaptureRegion?) -> Void)?
     private var localKeyMonitor: Any?
+    private let screens: () -> [NSScreen]
+    private let cancelKeys = HotKeys()
+
+    init(screens: @escaping () -> [NSScreen] = { NSScreen.screens }) {
+        self.screens = screens
+    }
 
     func begin(scrolling: Bool, completion: @escaping (CaptureRegion?) -> Void) {
+        if self.completion != nil { end(nil) }
         self.completion = completion
-        for screen in NSScreen.screens {
+        // Capture can start while another app still owns keyboard focus.
+        // Reserve Escape before presenting any selection windows, then release it on completion.
+        cancelKeys.register(id: CaptureHotKeyID.selectionCancel, key: UInt32(kVK_Escape), modifiers: 0) { [weak self] in
+            self?.end(nil)
+        }
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == kVK_Escape { self?.end(nil); return nil }
+            return event
+        }
+        for screen in screens() {
             let window = SelectionWindow(contentRect: screen.frame, styleMask: .borderless,
                                          backing: .buffered, defer: false, screen: screen)
             window.isOpaque = false; window.backgroundColor = .clear
@@ -145,20 +162,20 @@ final class SelectionController {
                 let global = rect.offsetBy(dx: screen.frame.minX, dy: screen.frame.minY)
                 self?.end(CaptureRegion(screen: screen, rect: global))
             }
+            window.onCancel = { [weak self] in self?.end(nil) }
             window.contentView = view
+            window.initialFirstResponder = view
+            window.makeFirstResponder(view)
             windows.append(window)
             window.makeKeyAndOrderFront(nil)
         }
         NSApp.activate(ignoringOtherApps: true)
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 { self?.end(nil); return nil }
-            return event
-        }
     }
 
     private func end(_ region: CaptureRegion?) {
         guard let callback = completion else { return }
         completion = nil
+        cancelKeys.unregister(CaptureHotKeyID.selectionCancel)
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
         localKeyMonitor = nil
         for window in windows { window.orderOut(nil); window.close() }
@@ -168,7 +185,13 @@ final class SelectionController {
 }
 
 private final class SelectionWindow: NSWindow {
+    var onCancel: (() -> Void)?
     override var canBecomeKey: Bool { true }
+    override func cancelOperation(_ sender: Any?) { onCancel?() }
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == kVK_Escape { onCancel?() }
+        else { super.keyDown(with: event) }
+    }
 }
 
 private final class SelectionView: NSView {
@@ -198,7 +221,7 @@ private final class SelectionView: NSView {
         NSColor.black.withAlphaComponent(0.25).setFill(); bounds.fill()
         if selection.width > 0 {
             NSColor.clear.setFill(); selection.fill(using: .copy)
-            NSColor.controlAccentColor.setStroke()
+            NSColor.screenClipAccent.setStroke()
             let path = NSBezierPath(rect: selection.insetBy(dx: 0.5, dy: 0.5))
             path.lineWidth = 1.5; path.stroke()
         }
@@ -243,17 +266,15 @@ final class ScrollPanel: NSPanel {
         level = .floating; isOpaque = false; backgroundColor = .clear
         hasShadow = true; isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let effect = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 474, height: 104))
-        effect.material = .hudWindow; effect.blendingMode = .behindWindow; effect.state = .active
-        effect.wantsLayer = true; effect.layer?.cornerRadius = 13; effect.layer?.masksToBounds = true
+        let effect = FrostedSurface(frame: CGRect(x: 0, y: 0, width: 474, height: 104), radius: 14)
         contentView = effect
         message.frame = CGRect(x: 16, y: 68, width: 442, height: 20)
         message.font = .systemFont(ofSize: 13, weight: .medium)
         progress.frame = CGRect(x: 16, y: 37, width: 190, height: 20)
-        progress.textColor = .secondaryLabelColor; progress.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        progress.textColor = .screenClipSecondaryLabel; progress.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         let hint = NSTextField(labelWithString: finishShortcut.map { $0 + " 完成 · Esc 取消" } ?? "Esc 取消")
         hint.frame = CGRect(x: 16, y: 10, width: 185, height: 18)
-        hint.font = .systemFont(ofSize: 11); hint.textColor = .secondaryLabelColor
+        hint.font = .systemFont(ofSize: 11); hint.textColor = .screenClipSecondaryLabel
         finishButton.target = self; finishButton.action = #selector(finish)
         finishButton.bezelStyle = .rounded
         finishButton.frame = CGRect(x: 360, y: 14, width: 102, height: 32)
@@ -278,7 +299,7 @@ final class RegionBorder: NSWindow {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let view = NSView(frame: CGRect(origin: .zero, size: frame.size))
         view.wantsLayer = true; view.layer?.borderWidth = 2
-        view.layer?.borderColor = NSColor.controlAccentColor.cgColor
+        view.layer?.borderColor = NSColor.screenClipAccent.cgColor
         contentView = view
     }
 }

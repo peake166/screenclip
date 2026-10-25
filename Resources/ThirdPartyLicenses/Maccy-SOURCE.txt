@@ -1,0 +1,21 @@
+Upstream: https://github.com/p0deje/Maccy
+Pinned revision: 54fb9f00b828a4ec367e706c0e276df90febe76a
+License: MIT; copyright (c) 2025 Alex Rodionov. See Maccy-LICENSE.txt.
+
+Adapted into Sources/ClipboardCapture.swift from:
+- Maccy/Clipboard.swift
+- Maccy/Extensions/NSPasteboard.PasteboardType+Types.swift
+
+The supported format handling, sensitive/temporary pasteboard type filtering,
+and change-count polling approach are retained. Integration preserves individual
+pasteboard item boundaries, prefers PNG over duplicate TIFF data, bounds payload
+size, and uses a ScreenClip-specific marker to avoid recording its own restores.
+History persistence, UI and settings use the screenshot helper's own code.
+Native paste events in Sources/ClipboardPaste.swift additionally follow
+Maccy/Clipboard.swift (Git blob abb9c6af5399cee274acbf179f8fc0aaf125716a),
+which credits Clipy and Flycut. The nonactivating panel approach was reviewed in
+Maccy/FloatingPanel.swift (Git blob 7403b9c75454b6944456a9a728779d41aad62475).
+ScreenClip adds bounded focus checks, cancellation, modifier-release waiting,
+keyboard-layout mapping and explicit copy-only fallback.
+No Maccy third-party package dependencies, notifier content logging, or updater
+code are included.

@@ -5,18 +5,19 @@ import Foundation
 enum CaptureHotKeyID {
     static let scrollCancel: UInt32 = 3
     static let translationCancel: UInt32 = 5
+    static let selectionCancel: UInt32 = 7
 }
 
 enum ShortcutAction: String, CaseIterable {
-    case copy, scroll, translate
+    case copy, scroll, translate, clipboard
     var title: String {
-        switch self { case .copy: return "截图并复制"; case .scroll: return "滚动截图"; case .translate: return "截图翻译" }
+        switch self { case .copy: return "截图并复制"; case .scroll: return "滚动截图"; case .translate: return "截图翻译"; case .clipboard: return "剪贴板历史" }
     }
     var hotKeyID: UInt32 {
-        switch self { case .copy: return 1; case .scroll: return 2; case .translate: return 4 }
+        switch self { case .copy: return 1; case .scroll: return 2; case .translate: return 4; case .clipboard: return 6 }
     }
     var symbolName: String {
-        switch self { case .copy: return "viewfinder"; case .scroll: return "rectangle.portrait.on.rectangle.portrait"; case .translate: return "character.bubble" }
+        switch self { case .copy: return "viewfinder"; case .scroll: return "rectangle.portrait.on.rectangle.portrait"; case .translate: return "character.bubble"; case .clipboard: return "doc.on.clipboard" }
     }
 }
 
@@ -28,7 +29,8 @@ struct Shortcut: Codable, Equatable {
     static let defaults: [ShortcutAction: Shortcut] = [
         .copy: Shortcut(keyCode: UInt32(kVK_ANSI_4), modifiers: UInt32(controlKey | optionKey | cmdKey), keyLabel: "4"),
         .scroll: Shortcut(keyCode: UInt32(kVK_ANSI_5), modifiers: UInt32(controlKey | optionKey | cmdKey), keyLabel: "5"),
-        .translate: Shortcut(keyCode: UInt32(kVK_ANSI_6), modifiers: UInt32(controlKey | optionKey | cmdKey), keyLabel: "6")
+        .translate: Shortcut(keyCode: UInt32(kVK_ANSI_6), modifiers: UInt32(controlKey | optionKey | cmdKey), keyLabel: "6"),
+        .clipboard: Shortcut(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(shiftKey | cmdKey), keyLabel: "V")
     ]
     var isValid: Bool {
         let modifiersOnly: Set<UInt32> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
@@ -67,7 +69,7 @@ final class ShortcutPreferences {
     private let apply: ([ShortcutAction: Shortcut]) -> Bool
     private(set) var bindings = Shortcut.defaults
     private static let storageKey = "captureShortcuts.v1"
-    private struct Saved: Codable { let copy: Shortcut?; let scroll: Shortcut?; let translate: Shortcut?; let version: Int? }
+    private struct Saved: Codable { let copy: Shortcut?; let scroll: Shortcut?; let translate: Shortcut?; let clipboard: Shortcut?; let version: Int? }
     init(defaults: UserDefaults = .standard, apply: @escaping ([ShortcutAction: Shortcut]) -> Bool) {
         self.defaults = defaults; self.apply = apply
         if let data = defaults.data(forKey: Self.storageKey),
@@ -75,10 +77,14 @@ final class ShortcutPreferences {
             var translated = saved.translate
             if saved.version == nil, let proposed = Shortcut.defaults[.translate],
                ![saved.copy, saved.scroll].compactMap({ $0 }).contains(where: { $0.matches(proposed) }) { translated = proposed }
-            let values = [saved.copy, saved.scroll, translated].compactMap { $0 }
+            var clipboard = saved.clipboard
+            if (saved.version ?? 0) < 3, let proposed = Shortcut.defaults[.clipboard],
+               ![saved.copy, saved.scroll, translated].compactMap({ $0 }).contains(where: { $0.matches(proposed) }) { clipboard = proposed }
+            let values = [saved.copy, saved.scroll, translated, clipboard].compactMap { $0 }
             guard values.allSatisfy(\.isValid), !values.enumerated().contains(where: { index, value in values.dropFirst(index + 1).contains(where: { $0.matches(value) }) }) else { return }
             bindings = [:]
             bindings[.copy] = saved.copy; bindings[.scroll] = saved.scroll; bindings[.translate] = translated
+            bindings[.clipboard] = clipboard
         }
     }
     func change(_ action: ShortcutAction, to shortcut: Shortcut?) -> String? {
@@ -95,7 +101,7 @@ final class ShortcutPreferences {
     private func commit(_ proposed: [ShortcutAction: Shortcut]) -> String? {
         guard apply(proposed) else { return "快捷键已被占用，请换一组" }
         bindings = proposed
-        if let data = try? JSONEncoder().encode(Saved(copy: proposed[.copy], scroll: proposed[.scroll], translate: proposed[.translate], version: 2)) {
+        if let data = try? JSONEncoder().encode(Saved(copy: proposed[.copy], scroll: proposed[.scroll], translate: proposed[.translate], clipboard: proposed[.clipboard], version: 3)) {
             defaults.set(data, forKey: Self.storageKey)
         }
         return nil

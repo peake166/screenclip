@@ -18,9 +18,9 @@ for screenclip_arch in "${screenclip_architectures[@]}"; do
 done
 xcrun lipo -create "${screenclip_binaries[@]}" -output .build/App/Contents/MacOS/ScreenClip
 for icon_size in 16 32 128 256 512; do
-  sips -z "$icon_size" "$icon_size" Assets/AppIcon.png --out ".build/AppIcon.iconset/icon_${icon_size}x${icon_size}.png" >/dev/null
+  sips -z "$icon_size" "$icon_size" Assets/AppIcon-Blue.png --out ".build/AppIcon.iconset/icon_${icon_size}x${icon_size}.png" >/dev/null
   icon_retina=$((icon_size * 2))
-  sips -z "$icon_retina" "$icon_retina" Assets/AppIcon.png --out ".build/AppIcon.iconset/icon_${icon_size}x${icon_size}@2x.png" >/dev/null
+  sips -z "$icon_retina" "$icon_retina" Assets/AppIcon-Blue.png --out ".build/AppIcon.iconset/icon_${icon_size}x${icon_size}@2x.png" >/dev/null
 done
 iconutil -c icns .build/AppIcon.iconset -o .build/App/Contents/Resources/AppIcon.icns
 ditto Resources/ThirdPartyLicenses .build/App/Contents/Resources/ThirdPartyLicenses
@@ -34,8 +34,8 @@ cat > .build/App/Contents/Info.plist <<'PLIST'
 <key>CFBundleName</key><string>截图助手</string>
 <key>CFBundleDisplayName</key><string>截图助手</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.5.0</string>
-<key>CFBundleVersion</key><string>16</string>
+<key>CFBundleShortVersionString</key><string>1.8.0</string>
+<key>CFBundleVersion</key><string>23</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>

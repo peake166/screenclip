@@ -30,7 +30,7 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
         minSize = CGSize(width: 480, height: 340)
         level = .floating; hidesOnDeactivate = false; isMovableByWindowBackground = true
         collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-        let effect = NSVisualEffectView(); effect.material = .sidebar; effect.state = .active
+        let effect = FrostedSurface()
         contentView = effect
         let root = NSStackView(); root.orientation = .vertical; root.alignment = .leading; root.spacing = 12
         root.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(root)
@@ -40,9 +40,9 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
             root.topAnchor.constraint(equalTo: effect.topAnchor, constant: 18),
             root.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -18)
         ])
-        service.font = .systemFont(ofSize: 12, weight: .medium); service.textColor = .secondaryLabelColor
+        service.font = .systemFont(ofSize: 12, weight: .medium); service.textColor = .screenClipSecondaryLabel
         let settings = NSButton(title: "翻译设置…", target: self, action: #selector(openSettings))
-        settings.isBordered = false; settings.font = .systemFont(ofSize: 12); settings.contentTintColor = .secondaryLabelColor
+        settings.isBordered = false; settings.font = .systemFont(ofSize: 12); settings.contentTintColor = .screenClipSecondaryLabel
         let top = NSStackView(views: [service, NSView(), settings]); top.alignment = .centerY
         root.addArrangedSubview(top)
         tabs.selectedSegment = 0; tabs.target = self; tabs.action = #selector(switchTab)
@@ -52,10 +52,11 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
         let actions = NSStackView(views: [tabs, NSView(), copy]); actions.alignment = .centerY
         root.addArrangedSubview(actions)
         let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true; scroll.borderType = .noBorder; scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true; scroll.borderType = .noBorder; scroll.drawsBackground = true; scroll.backgroundColor = .textBackgroundColor
+        scroll.wantsLayer = true; scroll.layer?.cornerRadius = 12; scroll.layer?.masksToBounds = true
         text.isEditable = false; text.isSelectable = true; text.isRichText = false
         text.drawsBackground = false; text.font = .systemFont(ofSize: 15); text.textColor = .labelColor
-        text.textContainerInset = CGSize(width: 4, height: 8)
+        text.textContainerInset = CGSize(width: 14, height: 12)
         text.isVerticallyResizable = true; text.isHorizontallyResizable = false
         text.autoresizingMask = [.width]; text.textContainer?.widthTracksTextView = true
         text.setAccessibilityLabel("翻译内容")
@@ -65,7 +66,7 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
         spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
         spinner.widthAnchor.constraint(equalToConstant: 16).isActive = true
         spinner.heightAnchor.constraint(equalToConstant: 16).isActive = true
-        status.font = .systemFont(ofSize: 12); status.textColor = .secondaryLabelColor
+        status.font = .systemFont(ofSize: 12); status.textColor = .screenClipSecondaryLabel
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         retry.target = self; retry.action = #selector(retryTranslation); retry.bezelStyle = .rounded
         let footer = NSStackView(views: [spinner, status, NSView(), retry]); footer.alignment = .centerY; footer.spacing = 8
@@ -102,7 +103,7 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
         text.textColor = .labelColor
         copy.title = original ? "复制原文" : "复制译文"
         copy.isEnabled = !value.isEmpty && (original || workflow.phase == .finished)
-        status.textColor = .secondaryLabelColor
+        status.textColor = .screenClipSecondaryLabel
         retry.isHidden = true
         if workflow.phase.isBusy { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         switch workflow.phase {
@@ -117,7 +118,7 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
             retry.title = workflow.original.isEmpty ? "重新截图" : "重试"; retry.isHidden = false
         }
         if settingsUpdated, !workflow.phase.isBusy, !workflow.original.isEmpty {
-            status.stringValue = "设置已更新"; status.textColor = .secondaryLabelColor
+            status.stringValue = "设置已更新"; status.textColor = .screenClipSecondaryLabel
             retry.title = "重新翻译"; retry.isHidden = false
         }
     }

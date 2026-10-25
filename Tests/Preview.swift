@@ -6,7 +6,7 @@ struct Preview {
     @MainActor static func main() throws {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
-        let icon = NSImage(contentsOfFile: "Assets/AppIcon.png")
+        let icon = NSImage(contentsOfFile: "Assets/AppIcon-Blue.png")
         let folder = URL(fileURLWithPath: ".build/previews")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let custom: [ShortcutAction: Shortcut] = [

@@ -21,13 +21,16 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
     private var keyEdits: [TranslationProvider: String] = [:]
     private var testTask: Task<Void, Never>?
     private var testID = UUID()
+    private var benchmarkWindow: TranslationBenchmarkWindow?
+    private let benchmarkTranslator: TranslationBenchmark.Translator?
 
-    init(store: TranslationSettingsStore) {
-        self.store = store; draft = store.settings; currentProvider = store.settings.provider
+    init(store: TranslationSettingsStore, benchmarkTranslator: TranslationBenchmark.Translator? = nil) {
+        self.store = store; self.benchmarkTranslator = benchmarkTranslator
+        draft = store.settings; currentProvider = store.settings.provider
         super.init(contentRect: CGRect(x: 0, y: 0, width: 460, height: 360),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = "翻译设置"; isReleasedWhenClosed = false; delegate = self; level = .floating
-        let effect = NSVisualEffectView(); effect.material = .sidebar; effect.state = .active
+        let effect = FrostedSurface()
         contentView = effect
         root.orientation = .vertical; root.alignment = .leading; root.spacing = 14
         root.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(root)
@@ -53,14 +56,14 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
         cloudFields.addArrangedSubview(row("模型", model))
         cloudFields.addArrangedSubview(row("API 密钥", key))
         let keyNote = NSTextField(labelWithString: "密钥仅保存在 macOS 钥匙串")
-        keyNote.font = .systemFont(ofSize: 11); keyNote.textColor = .secondaryLabelColor
+        keyNote.font = .systemFont(ofSize: 11); keyNote.textColor = .screenClipSecondaryLabel
         removeKey.target = self; removeKey.action = #selector(deleteKey)
-        removeKey.isBordered = false; removeKey.font = .systemFont(ofSize: 11); removeKey.contentTintColor = .secondaryLabelColor
+        removeKey.isBordered = false; removeKey.font = .systemFont(ofSize: 11); removeKey.contentTintColor = .screenClipSecondaryLabel
         let keyFooter = NSStackView(views: [keyNote, NSView(), removeKey]); keyFooter.alignment = .centerY
         cloudFields.addArrangedSubview(keyFooter)
         for view in cloudFields.arrangedSubviews { view.widthAnchor.constraint(equalTo: cloudFields.widthAnchor).isActive = true }
         root.addArrangedSubview(cloudFields)
-        note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor
+        note.font = .systemFont(ofSize: 11); note.textColor = .screenClipSecondaryLabel
         root.addArrangedSubview(note)
         feedback.font = .systemFont(ofSize: 12); feedback.isHidden = true
         feedback.setAccessibilityLabel("设置状态")
@@ -70,7 +73,8 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancelSettings)); cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\u{1b}"
         test.target = self; test.action = #selector(testTranslation); test.bezelStyle = .rounded
-        let footer = NSStackView(views: [test, NSView(), cancel, save]); footer.alignment = .centerY; footer.spacing = 8
+        let speed = NSButton(title: "模型测速…", target: self, action: #selector(openBenchmark)); speed.bezelStyle = .rounded
+        let footer = NSStackView(views: [test, speed, NSView(), cancel, save]); footer.alignment = .centerY; footer.spacing = 8
         root.addArrangedSubview(footer)
         for view in root.arrangedSubviews { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
         system.view.frame = NSRect(x: 0, y: 0, width: 1, height: 1); effect.addSubview(system.view)
@@ -78,7 +82,7 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
     }
 
     private func row(_ title: String, _ field: NSView) -> NSStackView {
-        let label = NSTextField(labelWithString: title); label.font = .systemFont(ofSize: 12); label.textColor = .secondaryLabelColor
+        let label = NSTextField(labelWithString: title); label.font = .systemFont(ofSize: 12); label.textColor = .screenClipSecondaryLabel
         label.widthAnchor.constraint(equalToConstant: 68).isActive = true
         let row = NSStackView(views: [label, field]); row.spacing = 12; row.alignment = .centerY
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -135,6 +139,30 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
         } catch { showFeedback(error.localizedDescription, isError: true) }
     }
     @objc private func cancelSettings() { close() }
+    @objc private func openBenchmark() {
+        guard benchmarkWindow == nil else { return }
+        stopTest(); syncDraft()
+        do {
+            var keys: [TranslationProvider: String] = [:]
+            for service in TranslationProvider.allCases where service != .system {
+                let value = try keyEdits[service] ?? store.key(for: service) ?? ""
+                keys[service] = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let settings = draft, pendingKeys = keyEdits
+            let benchmark = TranslationBenchmark(settings: settings, keys: keys, translator: benchmarkTranslator)
+            let window = TranslationBenchmarkWindow(benchmark: benchmark)
+            window.onUse = { [weak self] candidate in
+                guard let self else { return }
+                var chosen = settings; chosen.provider = candidate.provider
+                chosen.setModel(candidate.model, for: candidate.provider)
+                try self.store.save(chosen, keys: pendingKeys)
+                self.draft = chosen; self.onSaved?(); self.close()
+            }
+            window.onClosed = { [weak self] in self?.benchmarkWindow = nil }
+            benchmarkWindow = window
+            beginSheet(window)
+        } catch { showFeedback(TranslationFailure.credentials.localizedDescription, isError: true) }
+    }
     @objc private func testTranslation() {
         guard testTask == nil else { return }
         syncDraft(); feedback.isHidden = true
@@ -184,5 +212,8 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
         setContentSize(NSSize(width: 460, height: max(200, height)))
         setFrameOrigin(NSPoint(x: frame.minX, y: top - frame.height))
     }
-    func windowWillClose(_ notification: Notification) { stopTest(); key.stringValue = ""; keyEdits.removeAll() }
+    func windowWillClose(_ notification: Notification) {
+        benchmarkWindow?.close(); benchmarkWindow = nil
+        stopTest(); key.stringValue = ""; keyEdits.removeAll()
+    }
 }

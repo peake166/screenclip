@@ -1,15 +1,5 @@
 import AppKit
 
-extension NSColor {
-    static var screenClipAccent: NSColor {
-        NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor(srgbRed: 0.36, green: 0.81, blue: 0.70, alpha: 1)
-                : NSColor(srgbRed: 0.08, green: 0.46, blue: 0.38, alpha: 1)
-        }
-    }
-}
-
 private final class CaptureActionButton: NSButton {
     private let actionName: String
     private let symbol: NSImage?
@@ -29,17 +19,17 @@ private final class CaptureActionButton: NSButton {
     init(action: ShortcutAction, symbolName: String) {
         actionName = action.title
         symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 21, weight: .medium))
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 19, weight: .medium))
         super.init(frame: .zero)
         title = ""; isBordered = false; setButtonType(.momentaryPushIn)
         focusRingType = .exterior
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 60).isActive = true
+        heightAnchor.constraint(equalToConstant: 52).isActive = true
         nameLabel.stringValue = actionName
         nameLabel.font = .systemFont(ofSize: 14, weight: .medium)
         nameLabel.textColor = .labelColor
         shortcutLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        shortcutLabel.textColor = .secondaryLabelColor
+        shortcutLabel.textColor = .screenClipSecondaryLabel
         shortcutLabel.isHidden = true
         shortcutLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         for label in [nameLabel, shortcutLabel] {
@@ -74,16 +64,17 @@ private final class CaptureActionButton: NSButton {
     }
     override func draw(_ dirtyRect: NSRect) {
         let pressed = isHighlighted
-        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 13, yRadius: 13)
-        (hovered || pressed ? NSColor.screenClipAccent.withAlphaComponent(pressed ? 0.14 : 0.07) : NSColor.controlBackgroundColor.withAlphaComponent(0.56)).setFill()
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
+        (hovered || pressed ? NSColor.screenClipAccent.withAlphaComponent(pressed ? 0.14 : 0.07) : NSColor.clear).setFill()
         shape.fill()
-        NSColor.separatorColor.withAlphaComponent(hovered ? 0.6 : 0.32).setStroke(); shape.lineWidth = 0.7; shape.stroke()
-        let tile = CGRect(x: 12, y: 12, width: 36, height: 36)
-        NSColor.screenClipAccent.withAlphaComponent(0.09).setFill()
+        NSColor.separatorColor.withAlphaComponent(hovered ? 0.45 : 0).setStroke(); shape.lineWidth = 0.7; shape.stroke()
+        let tile = CGRect(x: 12, y: 8, width: 36, height: 36)
+        NSColor.screenClipAccent.withAlphaComponent(0.08).setFill()
         NSBezierPath(roundedRect: tile, xRadius: 9, yRadius: 9).fill()
         if let symbol {
+            let symbolColor = NSColor.screenClipAccent
             let tinted = NSImage(size: symbol.size, flipped: false) { rect in
-                NSColor.screenClipAccent.setFill(); rect.fill()
+                symbolColor.setFill(); rect.fill()
                 symbol.draw(in: rect, from: .zero, operation: .destinationIn, fraction: 1)
                 return true
             }
@@ -121,18 +112,29 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     private var collapsedFrameHeight: CGFloat = 0
 
     init(icon: NSImage?) {
-        super.init(contentRect: CGRect(x: 0, y: 0, width: 408, height: 414),
+        super.init(contentRect: CGRect(x: 0, y: 0, width: 420, height: 428),
                    styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         title = "截图助手"; titleVisibility = .hidden; titlebarAppearsTransparent = true
         isReleasedWhenClosed = false; isMovableByWindowBackground = true
         delegate = self
-        let effect = NSVisualEffectView()
-        effect.material = .sidebar; effect.blendingMode = .behindWindow; effect.state = .active
+        let effect = FrostedSurface()
         contentView = effect
         let root = NSStackView()
         root.orientation = .vertical; root.alignment = .leading; root.spacing = 12
         root.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(root)
+        // Keep the native close control above the layer-backed full-size glass content.
+        if let close = NSWindow.standardWindowButton(.closeButton, for: styleMask) {
+            standardWindowButton(.closeButton)?.isHidden = true
+            close.target = self; close.action = #selector(NSWindow.performClose(_:))
+            close.setAccessibilityLabel("关闭窗口"); close.toolTip = "关闭窗口"
+            close.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(close)
+            NSLayoutConstraint.activate([
+                close.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 14),
+                close.topAnchor.constraint(equalTo: effect.topAnchor, constant: 14),
+                close.widthAnchor.constraint(equalToConstant: 16), close.heightAnchor.constraint(equalToConstant: 16)
+            ])
+        }
         NSLayoutConstraint.activate([
             root.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 22),
             root.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -22),
@@ -140,10 +142,10 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         ])
         let image = NSImageView()
         image.image = icon; image.imageScaling = .scaleProportionallyUpOrDown
-        image.widthAnchor.constraint(equalToConstant: 48).isActive = true
-        image.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        image.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        image.heightAnchor.constraint(equalToConstant: 40).isActive = true
         let name = NSTextField(labelWithString: "截图助手")
-        name.font = .systemFont(ofSize: 18, weight: .semibold)
+        name.font = .systemFont(ofSize: 18, weight: .medium)
         permission.target = self; permission.action = #selector(permissionPressed)
         permission.isBordered = false; permission.font = .systemFont(ofSize: 11, weight: .medium)
         permission.setAccessibilityLabel("截图权限")
@@ -151,11 +153,11 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         let header = NSStackView(views: [image, name, spacer, permission])
         header.spacing = 9; header.alignment = .centerY
         root.addArrangedSubview(header)
-        let buttons = NSStackView(); buttons.orientation = .vertical; buttons.spacing = 8
+        let buttons = NSStackView(); buttons.orientation = .vertical; buttons.spacing = 1
         for action in ShortcutAction.allCases {
             let button = CaptureActionButton(action: action, symbolName: action.symbolName)
             button.target = self
-            switch action { case .copy: button.action = #selector(copyPressed); case .scroll: button.action = #selector(scrollPressed); case .translate: button.action = #selector(translatePressed) }
+            switch action { case .copy: button.action = #selector(copyPressed); case .scroll: button.action = #selector(scrollPressed); case .translate: button.action = #selector(translatePressed); case .clipboard: button.action = #selector(clipboardPressed) }
             captureButtons[action] = button; buttons.addArrangedSubview(button)
             button.widthAnchor.constraint(equalTo: buttons.widthAnchor).isActive = true
         }
@@ -165,12 +167,12 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         toggle.title = "快捷键"; toggle.isBordered = false
         toggle.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
         toggle.imagePosition = .imageLeft; toggle.imageHugsTitle = true
-        toggle.contentTintColor = .secondaryLabelColor; toggle.font = .systemFont(ofSize: 12, weight: .medium)
+        toggle.contentTintColor = .screenClipSecondaryLabel; toggle.font = .systemFont(ofSize: 12, weight: .medium)
         toggle.target = self; toggle.action = #selector(toggleSettings)
         toggle.setAccessibilityLabel("快捷键设置")
         let translationSettings = NSButton(title: "翻译设置…", target: self, action: #selector(translationSettingsPressed))
         translationSettings.isBordered = false; translationSettings.font = .systemFont(ofSize: 12)
-        translationSettings.contentTintColor = .secondaryLabelColor
+        translationSettings.contentTintColor = .screenClipSecondaryLabel
         let toggleRow = NSStackView(views: [toggle, NSView(), translationSettings]); toggleRow.heightAnchor.constraint(equalToConstant: 26).isActive = true
         root.addArrangedSubview(toggleRow)
         loginItem.target = self; loginItem.action = #selector(loginItemPressed)
@@ -187,7 +189,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         settings.orientation = .vertical; settings.alignment = .leading; settings.spacing = 10
         for action in ShortcutAction.allCases {
             let label = NSTextField(labelWithString: action.title)
-            label.font = .systemFont(ofSize: 12); label.textColor = .secondaryLabelColor
+            label.font = .systemFont(ofSize: 12); label.textColor = .screenClipSecondaryLabel
             let recorder = ShortcutRecorder()
             recorder.setAccessibilityLabel(action.title + "快捷键")
             recorder.onBegin = { [weak self] in
@@ -203,7 +205,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         }
         let reset = NSButton(title: "恢复默认", target: self, action: #selector(resetPressed))
         reset.isBordered = false; reset.font = .systemFont(ofSize: 11)
-        reset.contentTintColor = .secondaryLabelColor
+        reset.contentTintColor = .screenClipSecondaryLabel
         feedback.font = .systemFont(ofSize: 11); feedback.alignment = .right
         feedback.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let footer = NSStackView(views: [reset, feedback]); footer.spacing = 12
@@ -224,9 +226,9 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         }
         permission.attributedTitle = NSAttributedString(string: permissionGranted ? "● 就绪" : "授权截图", attributes: [
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: permissionGranted ? NSColor.secondaryLabelColor : NSColor.screenClipAccent
+            .foregroundColor: permissionGranted ? NSColor.screenClipSecondaryLabel : NSColor.screenClipAccent
         ])
-        permission.contentTintColor = permissionGranted ? .secondaryLabelColor : .screenClipAccent
+        permission.contentTintColor = permissionGranted ? .screenClipSecondaryLabel : .screenClipAccent
         permission.toolTip = permissionGranted ? "截图权限已开启" : "开启屏幕录制权限"
     }
     func revealSettings() { if !expanded { toggleSettings() } }
@@ -246,7 +248,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     }
     func showFeedback(_ message: String?, isError: Bool = false) {
         feedback.stringValue = message ?? ""
-        feedback.textColor = isError ? .systemRed : .secondaryLabelColor
+        feedback.textColor = isError ? .systemRed : .screenClipSecondaryLabel
     }
     func stopRecording() { recorders.values.forEach { $0.cancelRecording() } }
     func windowWillClose(_ notification: Notification) { stopRecording() }
@@ -260,6 +262,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     @objc private func copyPressed() { onCapture?(.copy) }
     @objc private func scrollPressed() { onCapture?(.scroll) }
     @objc private func translatePressed() { onCapture?(.translate) }
+    @objc private func clipboardPressed() { onCapture?(.clipboard) }
     @objc private func translationSettingsPressed() { stopRecording(); onTranslationSettings?() }
     @objc private func loginItemPressed() { onLoginItemChange?(loginItem.state == .on) }
     @objc private func loginItemSettingsPressed() { onLoginItemSettings?() }
@@ -269,7 +272,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         expanded.toggle(); settings.isHidden = !expanded
         toggle.image = NSImage(systemSymbolName: expanded ? "chevron.down" : "chevron.right", accessibilityDescription: nil)
         var newFrame = frame
-        let height = collapsedFrameHeight + (expanded ? 154 : 0)
+        let height = collapsedFrameHeight + (expanded ? 186 : 0)
         newFrame.origin.y += newFrame.height - height; newFrame.size.height = height
         setFrame(newFrame, display: true)
     }

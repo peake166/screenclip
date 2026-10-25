@@ -16,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var translationWindow: TranslationWindow?
     private var translationOverlay: TranslationOverlayController?
     private var translationSettingsWindow: TranslationSettingsWindow?
+    private let clipboardHistory = ClipboardHistory()
+    private var clipboardWindow: ClipboardHistoryWindow?
+    private let clipboardPaster = ClipboardPaster()
+    private var clipboardTarget: ClipboardPasteTarget?
     private var captureMenuItems: [ShortcutAction: NSMenuItem] = [:]
     private var recordingShortcut = false
     private lazy var preferences = ShortcutPreferences { [weak self] bindings in
@@ -47,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureMenuItems[.copy] = add(menu, "截图并复制", #selector(captureSingle))
         captureMenuItems[.scroll] = add(menu, "滚动截图 / 完成", #selector(captureLong))
         captureMenuItems[.translate] = add(menu, "截图翻译", #selector(captureTranslate))
+        captureMenuItems[.clipboard] = add(menu, "剪贴板历史", #selector(showClipboard))
         menu.addItem(.separator())
         add(menu, "打开窗口", #selector(showHelp))
         add(menu, "快捷键…", #selector(showShortcuts))
@@ -58,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let shortcutsOK = configureShortcuts(preferences.bindings, rollback: false)
         logger.notice("Started; shortcuts registered: \(shortcutsOK); screen permission: \(CGPreflightScreenCaptureAccess())")
         TextRecognizer.warmUp()
+        clipboardHistory.start()
         if LoginItemLaunch.shouldShowWindow(for: NSAppleEventManager.shared().currentAppleEvent) {
             showHelp()
             if !shortcutsOK {
@@ -88,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showHelp() {
+        clipboardPaster.cancel(); clipboardWindow?.dismiss()
         rememberTarget()
         if helpWindow == nil {
             let icon = Bundle.main.path(forResource: "AppIcon", ofType: "icns").flatMap { NSImage(contentsOfFile: $0) }
@@ -179,7 +186,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func performCapture(_ action: ShortcutAction) {
         logger.notice("Capture requested: \(action.rawValue, privacy: .public)")
-        switch action { case .copy: captureSingle(); case .scroll: captureLong(); case .translate: captureTranslate() }
+        switch action { case .copy: captureSingle(); case .scroll: captureLong(); case .translate: captureTranslate(); case .clipboard: showClipboard() }
+    }
+
+    @objc private func showClipboard() {
+        guard session == nil, !selecting else { showToast("请先结束当前截图"); return }
+        clipboardPaster.cancel()
+        if clipboardWindow?.isVisible == true { clipboardWindow?.cancelOperation(nil); return }
+        helpWindow?.stopRecording(); rememberTarget()
+        clipboardTarget = priorApplication.map { ClipboardPasteTarget(application: $0) }
+        helpWindow?.orderOut(nil); translationWindow?.orderOut(nil); translationOverlay?.close()
+        if clipboardWindow == nil {
+            let window = ClipboardHistoryWindow(history: clipboardHistory)
+            window.onAction = { [weak self] action in
+                guard let self else { return }
+                let target = self.clipboardTarget; self.clipboardTarget = nil
+                if action == .copy {
+                    target?.application.activate(options: []); self.showToast("已复制"); return
+                }
+                self.clipboardPaster.paste(to: target) { [weak self] outcome in
+                    switch outcome {
+                    case .sent: break
+                    case .copiedOnly(let message): self?.showToast(message)
+                    case .needsPermission: self?.showPastePermissionNeeded()
+                    }
+                }
+            }
+            window.onDismiss = { [weak self] in
+                self?.clipboardPaster.cancel(); self?.clipboardTarget?.application.activate(options: [])
+                self?.clipboardTarget = nil
+            }
+            clipboardWindow = window
+        }
+        clipboardWindow?.present(targetName: clipboardTarget?.name)
+    }
+
+    private func showPastePermissionNeeded() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert(); alert.messageText = "允许自动粘贴"
+        alert.informativeText = "请在“辅助功能”中允许截图助手。内容已复制，授权前可按 ⌘V 手动粘贴。"
+        alert.addButton(withTitle: "打开设置"); alert.addButton(withTitle: "稍后")
+        if alert.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func installEditingMenu() {
@@ -196,6 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showTranslationSettings() {
         helpWindow?.stopRecording()
+        clipboardPaster.cancel(); clipboardWindow?.dismiss()
         if let window = translationSettingsWindow, window.isVisible {
             NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil); return
         }
@@ -259,6 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         helpWindow?.stopRecording()
+        clipboardPaster.cancel(); clipboardWindow?.dismiss()
         rememberTarget(); helpWindow?.orderOut(nil); translationWindow?.orderOut(nil)
         translationOverlay?.close()
         return true
@@ -371,9 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isReleasedWhenClosed = false; panel.isOpaque = false; panel.backgroundColor = .clear
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = true; panel.level = .floating
-        let effect = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 390, height: 56))
-        effect.material = .hudWindow; effect.state = .active; effect.wantsLayer = true
-        effect.layer?.cornerRadius = 14; effect.layer?.masksToBounds = true
+        let effect = FrostedSurface(frame: CGRect(x: 0, y: 0, width: 390, height: 56), radius: 14)
         let label = NSTextField(labelWithString: message)
         label.font = .systemFont(ofSize: 13, weight: .medium)
         label.alignment = .center; label.frame = CGRect(x: 10, y: 17, width: 370, height: 22)
@@ -389,7 +439,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc func quit() { session?.cancel(); translationOverlay?.close(); translationWindow?.close(); translationSettingsWindow?.close(); NSApp.terminate(nil) }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        clipboardHistory.stop(); clipboardPaster.cancel()
+        Task { await clipboardHistory.flush(); NSApp.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+    }
+    func applicationWillTerminate(_ notification: Notification) { clipboardHistory.stop() }
+    @objc func quit() { clipboardHistory.stop(); clipboardPaster.cancel(); clipboardWindow?.close(); session?.cancel(); translationOverlay?.close(); translationWindow?.close(); translationSettingsWindow?.close(); NSApp.terminate(nil) }
 }
 
 MainActor.assumeIsolated {

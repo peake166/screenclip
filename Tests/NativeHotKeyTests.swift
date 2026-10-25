@@ -34,7 +34,7 @@ struct NativeHotKeyTests {
         check(probe.register(id: 903, key: UInt32(kVK_F18), modifiers: modifiers, action: {}),
               "only unregistering the translation action releases its global shortcut")
         probe.unregister(903)
-        let reserved = ShortcutAction.allCases.map(\.hotKeyID) + [CaptureHotKeyID.scrollCancel, CaptureHotKeyID.translationCancel]
+        let reserved = ShortcutAction.allCases.map(\.hotKeyID) + [CaptureHotKeyID.scrollCancel, CaptureHotKeyID.translationCancel, CaptureHotKeyID.selectionCancel]
         check(Set(reserved).count == reserved.count, "permanent actions and temporary cancel shortcuts have distinct identities")
         if failures > 0 { exit(1) }
         print("All native hotkey checks passed")

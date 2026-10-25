@@ -107,7 +107,7 @@ import AppKit
         toolbar.copyButton.title = original ? "复制原文" : "复制译文"
         toolbar.copyButton.isEnabled = original ? !workflow.original.isEmpty : workflow.phase == .finished
         toolbar.retryButton.isHidden = true
-        toolbar.status.textColor = .secondaryLabelColor
+        toolbar.status.textColor = .screenClipSecondaryLabel
         if workflow.phase.isBusy { toolbar.spinner.startAnimation(nil) } else { toolbar.spinner.stopAnimation(nil) }
         switch workflow.phase {
         case .idle: toolbar.status.stringValue = ""
@@ -124,7 +124,7 @@ import AppKit
             toolbar.retryButton.isHidden = false
         }
         if settingsUpdated, !workflow.phase.isBusy, !workflow.original.isEmpty {
-            toolbar.status.stringValue = "设置已更新"; toolbar.status.textColor = .secondaryLabelColor
+            toolbar.status.stringValue = "设置已更新"; toolbar.status.textColor = .screenClipSecondaryLabel
             toolbar.retryButton.title = "重译"; toolbar.retryButton.isHidden = false
         }
     }
@@ -168,8 +168,7 @@ import AppKit
     init() {
         super.init(contentRect: CGRect(x: 0, y: 0, width: 540, height: 64), styleMask: [.borderless], backing: .buffered, defer: false)
         title = "翻译工具栏"; hasShadow = true
-        let effect = NSVisualEffectView(); effect.material = .hudWindow; effect.state = .active
-        effect.wantsLayer = true; effect.layer?.cornerRadius = 12; effect.layer?.masksToBounds = true
+        let effect = FrostedSurface(radius: 14)
         contentView = effect
         let row = NSStackView(); row.orientation = .horizontal; row.distribution = .fill
         row.spacing = 7; row.alignment = .centerY

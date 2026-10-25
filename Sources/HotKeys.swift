@@ -16,7 +16,10 @@ final class HotKeys {
                                            nil, MemoryLayout<EventHotKeyID>.size, nil, &key)
             guard result == noErr else { return result }
             let owner = Unmanaged<HotKeys>.fromOpaque(userData).takeUnretainedValue()
-            owner.actions[key.id]?()
+            guard key.signature == 0x53434C50, let action = owner.actions[key.id] else {
+                return OSStatus(eventNotHandledErr)
+            }
+            action()
             return noErr
         }, 1, &eventType, Unmanaged.passUnretained(self).toOpaque(), &handler)
     }

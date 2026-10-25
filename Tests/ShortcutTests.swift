@@ -100,7 +100,8 @@ struct ShortcutTests {
         let userBindings: [ShortcutAction: Shortcut] = [
             .copy: Shortcut(keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey | shiftKey), keyLabel: "A"),
             .scroll: Shortcut(keyCode: UInt32(kVK_ANSI_W), modifiers: UInt32(cmdKey | shiftKey), keyLabel: "W"),
-            .translate: custom
+            .translate: custom,
+            .clipboard: Shortcut.defaults[.clipboard]!
         ]
         window.update(bindings: userBindings, permissionGranted: true)
         window.contentView!.layoutSubtreeIfNeeded()
