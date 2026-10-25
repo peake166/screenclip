@@ -7,23 +7,32 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
     private let store: TranslationSettingsStore
     private let system = SystemTranslation()
     private let cloud = CloudTranslation()
+    private let recognize: (Raster) async throws -> String
+    private let translator: ((String, TranslationSettings) async throws -> String)?
+    private let board: NSPasteboard
     private let service = NSTextField(labelWithString: "")
     private let status = NSTextField(wrappingLabelWithString: "")
     private let spinner = NSProgressIndicator()
     private let tabs = NSSegmentedControl(labels: ["译文", "原文"], trackingMode: .selectOne, target: nil, action: nil)
     private let copy = NSButton(title: "复制译文", target: nil, action: nil)
+    private let copyOriginal = NSButton(title: "复制原文", target: nil, action: nil)
     private let retry = NSButton(title: "重试", target: nil, action: nil)
     private let text = NSTextView()
     private var settingsUpdated = false
-    private lazy var workflow = TranslationWorkflow(recognize: { image in try await TextRecognizer.recognize(image) }, translate: { [weak self] text, settings in
+    private lazy var workflow = TranslationWorkflow(recognize: recognize, translate: { [weak self] text, settings in
         guard let self else { throw CancellationError() }
+        if let translator = self.translator { return try await translator(text, settings) }
         if settings.provider == .system { return try await self.system.translate(text, to: settings.target) }
         guard let key = try self.store.key(for: settings.provider), !key.isEmpty else { throw TranslationFailure.missingKey }
         return try await self.cloud.translate(text, settings: settings, key: key)
     })
 
-    init(store: TranslationSettingsStore) {
+    init(store: TranslationSettingsStore,
+         recognize: @escaping (Raster) async throws -> String = { try await TextRecognizer.recognize($0) },
+         translate: ((String, TranslationSettings) async throws -> String)? = nil,
+         pasteboard: NSPasteboard = .general) {
         self.store = store
+        self.recognize = recognize; translator = translate; board = pasteboard
         super.init(contentRect: CGRect(x: 0, y: 0, width: 560, height: 470),
                    styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
         title = "截图翻译"; isReleasedWhenClosed = false; delegate = self
@@ -49,7 +58,8 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
         tabs.setAccessibilityLabel("译文或原文")
         copy.target = self; copy.action = #selector(copyText); copy.bezelStyle = .rounded
         copy.contentTintColor = .screenClipAccent
-        let actions = NSStackView(views: [tabs, NSView(), copy]); actions.alignment = .centerY
+        copyOriginal.target = self; copyOriginal.action = #selector(copyOriginalText); copyOriginal.bezelStyle = .rounded
+        let actions = NSStackView(views: [tabs, NSView(), copyOriginal, copy]); actions.alignment = .centerY
         root.addArrangedSubview(actions)
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true; scroll.borderType = .noBorder; scroll.drawsBackground = true; scroll.backgroundColor = .textBackgroundColor
@@ -82,10 +92,10 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
         refresh(); center()
     }
 
-    func begin(_ image: Raster) {
+    func begin(_ image: Raster, present: Bool = true) {
         settingsUpdated = false; tabs.selectedSegment = 0
         system.cancel(); workflow.begin(image, settings: store.settings)
-        NSApp.activate(ignoringOtherApps: true); makeKeyAndOrderFront(nil)
+        if present { NSApp.activate(ignoringOtherApps: true); makeKeyAndOrderFront(nil) }
     }
     func settingsChanged() {
         settingsUpdated = workflow.settings != store.settings
@@ -101,8 +111,8 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
             text.setSelectedRange(NSRange(location: min(selection.location, (value as NSString).length), length: 0))
         }
         text.textColor = .labelColor
-        copy.title = original ? "复制原文" : "复制译文"
-        copy.isEnabled = !value.isEmpty && (original || workflow.phase == .finished)
+        copyOriginal.isEnabled = !workflow.original.isEmpty
+        copy.isEnabled = !workflow.translated.isEmpty && workflow.phase == .finished
         status.textColor = .screenClipSecondaryLabel
         retry.isHidden = true
         if workflow.phase.isBusy { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
@@ -123,12 +133,12 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
         }
     }
     @objc private func switchTab() { refresh() }
-    @objc private func copyText() {
-        let value = tabs.selectedSegment == 1 ? workflow.original : workflow.translated
-        guard !value.isEmpty, copy.isEnabled else { return }
-        let board = NSPasteboard.general
+    @objc private func copyText() { copyValue(workflow.translated, enabled: copy.isEnabled, message: "已复制译文") }
+    @objc private func copyOriginalText() { copyValue(workflow.original, enabled: copyOriginal.isEnabled, message: "已复制原文") }
+    private func copyValue(_ value: String, enabled: Bool, message: String) {
+        guard !value.isEmpty, enabled else { return }
         board.clearContents()
-        if board.setString(value, forType: .string) { status.stringValue = tabs.selectedSegment == 1 ? "已复制原文" : "已复制译文" }
+        if board.setString(value, forType: .string) { status.stringValue = message }
         else { status.stringValue = "复制失败，请重试。" }
     }
     @objc private func retryTranslation() {

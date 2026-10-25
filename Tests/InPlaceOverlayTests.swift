@@ -111,7 +111,7 @@ private final class FocusPreviewScene: NSView {
             check(overlay.canvas?.subviews.filter { $0 is NSTextField }.allSatisfy(\.isHidden) == true,
                   "the original button reveals the untouched screenshot")
             check(overlay.focusBackdrops.count == NSScreen.screens.count, "original-image comparison retains the focus effect")
-            overlay.toolbar?.copyButton.performClick(nil)
+            overlay.toolbar?.copyOriginalButton.performClick(nil)
             check(board.string(forType: .string) == doc.text, "copy-original writes the recognized text to the isolated test clipboard")
             overlay.toolbar?.originalButton.performClick(nil)
             fail = false; overlay.toolbar?.retryButton.performClick(nil); await settled(overlay)

@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var priorApplication: NSRunningApplication?
     private var toast: NSPanel?
+    private let captureResult = CaptureResultController()
     private var activationObserver: NSObjectProtocol?
     private var permissionAlertVisible = false
     private let logger = Logger(subsystem: "com.local.screenclip", category: "Capture")
@@ -94,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showHelp() {
+        captureResult.close()
         clipboardPaster.cancel(); clipboardWindow?.dismiss()
         rememberTarget()
         if helpWindow == nil {
@@ -192,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showClipboard() {
         guard session == nil, !selecting else { showToast("请先结束当前截图"); return }
         clipboardPaster.cancel()
+        captureResult.close()
         if clipboardWindow?.isVisible == true { clipboardWindow?.cancelOperation(nil); return }
         helpWindow?.stopRecording(); rememberTarget()
         clipboardTarget = priorApplication.map { ClipboardPasteTarget(application: $0) }
@@ -245,6 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showTranslationSettings() {
+        captureResult.close()
         helpWindow?.stopRecording()
         clipboardPaster.cancel(); clipboardWindow?.dismiss()
         if let window = translationSettingsWindow, window.isVisible {
@@ -313,6 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardPaster.cancel(); clipboardWindow?.dismiss()
         rememberTarget(); helpWindow?.orderOut(nil); translationWindow?.orderOut(nil)
         translationOverlay?.close()
+        captureResult.close()
         return true
     }
 
@@ -356,7 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     defer { source.stop() }
                     let image = try await source.grab()
                     try ImageClipboard.copy(image)
-                    self.showToast("已复制图片 · \(image.width) × \(image.height)")
+                    self.captureResult.show(image, region: region, message: "已复制图片")
                 } catch { self.showError(error.localizedDescription) }
             }
         }
@@ -405,6 +410,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             capture.onTranslate = { [weak self] image in self?.translateImage(image) }
+            capture.onCopied = { [weak self] image, message in
+                self?.captureResult.show(image, region: region, message: message.components(separatedBy: " · ")[0])
+            }
             Task { await capture.start() }
         }
     }
@@ -440,12 +448,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        captureResult.close()
         clipboardHistory.stop(); clipboardPaster.cancel()
         Task { await clipboardHistory.flush(); NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
     func applicationWillTerminate(_ notification: Notification) { clipboardHistory.stop() }
-    @objc func quit() { clipboardHistory.stop(); clipboardPaster.cancel(); clipboardWindow?.close(); session?.cancel(); translationOverlay?.close(); translationWindow?.close(); translationSettingsWindow?.close(); NSApp.terminate(nil) }
+    @objc func quit() { captureResult.close(); clipboardHistory.stop(); clipboardPaster.cancel(); clipboardWindow?.close(); session?.cancel(); translationOverlay?.close(); translationWindow?.close(); translationSettingsWindow?.close(); NSApp.terminate(nil) }
 }
 
 MainActor.assumeIsolated {

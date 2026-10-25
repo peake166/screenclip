@@ -10,6 +10,22 @@ import AppKit
         window.contentView!.layoutSubtreeIfNeeded()
         let root = window.contentView!
         let close = all(root).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "关闭窗口" }
+        func trafficButton(_ label: String, _ type: NSWindow.ButtonType) -> NSButton? {
+            all(root).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == label } ?? window.standardWindowButton(type)
+        }
+        let traffic = [trafficButton("关闭窗口", .closeButton), trafficButton("最小化窗口", .miniaturizeButton), trafficButton("缩放窗口", .zoomButton)].compactMap { $0 }
+        func checkTraffic(_ label: String) {
+            let rects = traffic.map { $0.convert($0.bounds, to: root) }
+            print("Window control geometry (\(label)): \(rects)")
+            check(rects.count == 3 && rects.allSatisfy { abs($0.midY - rects[0].midY) < 0.5 },
+                  "all three window controls share one vertical center when \(label)")
+            check(rects.count == 3 && abs((rects[1].midX - rects[0].midX) - (rects[2].midX - rects[1].midX)) < 0.5,
+                  "the three window controls have equal horizontal spacing when \(label)")
+            check(rects.count == 3 && rects.allSatisfy { root.bounds.contains($0) && $0.size == rects[0].size },
+                  "window controls retain equal sizes inside the glass content when \(label)")
+        }
+        checkTraffic("collapsed")
+        window.revealSettings(); root.layoutSubtreeIfNeeded(); checkTraffic("settings expanded")
         check(close != nil && close?.isHiddenOrHasHiddenAncestor == false && close?.isEnabled == true,
               "the main window has a visible, enabled close control inside its glass surface")
         if let close {

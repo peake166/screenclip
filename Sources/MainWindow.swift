@@ -123,18 +123,32 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         root.orientation = .vertical; root.alignment = .leading; root.spacing = 12
         root.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(root)
-        // Keep the native close control above the layer-backed full-size glass content.
-        if let close = NSWindow.standardWindowButton(.closeButton, for: styleMask) {
-            standardWindowButton(.closeButton)?.isHidden = true
-            close.target = self; close.action = #selector(NSWindow.performClose(_:))
-            close.setAccessibilityLabel("关闭窗口"); close.toolTip = "关闭窗口"
-            close.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(close)
+        // Keep all native controls together above the full-size glass content.
+        let windowControls = NSStackView()
+        windowControls.orientation = .horizontal; windowControls.alignment = .centerY
+        windowControls.distribution = .fill; windowControls.spacing = 9
+        windowControls.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(windowControls)
+        let controlActions: [(NSWindow.ButtonType, String, Selector)] = [
+            (.closeButton, "关闭窗口", #selector(NSWindow.performClose(_:))),
+            (.miniaturizeButton, "最小化窗口", #selector(NSWindow.performMiniaturize(_:))),
+            (.zoomButton, "缩放窗口", #selector(NSWindow.performZoom(_:)))
+        ]
+        for (type, label, action) in controlActions {
+            let native = standardWindowButton(type)
+            let enabled = native?.isEnabled ?? false
+            native?.isHidden = true
+            guard let button = NSWindow.standardWindowButton(type, for: styleMask) else { continue }
+            button.target = self; button.action = action; button.isEnabled = enabled
+            button.setAccessibilityLabel(label); button.toolTip = label
+            windowControls.addArrangedSubview(button)
             NSLayoutConstraint.activate([
-                close.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 14),
-                close.topAnchor.constraint(equalTo: effect.topAnchor, constant: 14),
-                close.widthAnchor.constraint(equalToConstant: 16), close.heightAnchor.constraint(equalToConstant: 16)
+                button.widthAnchor.constraint(equalToConstant: 14), button.heightAnchor.constraint(equalToConstant: 14)
             ])
         }
+        NSLayoutConstraint.activate([
+            windowControls.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 14),
+            windowControls.topAnchor.constraint(equalTo: effect.topAnchor, constant: 14)
+        ])
         NSLayoutConstraint.activate([
             root.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 22),
             root.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -22),

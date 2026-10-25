@@ -62,7 +62,7 @@ enum TextRecognizer {
         try await recognizeDocument(raster).text
     }
 
-    static func recognizeDocument(_ raster: Raster) async throws -> OCRDocument {
+    static func recognizeDocument(_ raster: Raster, maximumCharacters: Int? = TranslationText.maximumCharacters) async throws -> OCRDocument {
         warmLock.withLock { userRequested = true }
         let cancellation = OCRCancellation()
         return try await withTaskCancellationHandler(operation: {
@@ -71,7 +71,7 @@ enum TextRecognizer {
                     let start = Date()
                     do {
                         try cancellation.check()
-                        let result = try recognizeDocumentImage(raster.cgImage(), cancellation: cancellation)
+                        let result = try recognizeDocumentImage(raster.cgImage(), cancellation: cancellation, maximumCharacters: maximumCharacters)
                         logger.notice("OCR completed; size: \(raster.width)x\(raster.height); milliseconds: \(Int(Date().timeIntervalSince(start) * 1000))")
                         continuation.resume(returning: result)
                     } catch { continuation.resume(throwing: error) }
@@ -96,7 +96,8 @@ enum TextRecognizer {
         try recognizeDocumentImage(image, cancellation: cancellation).text
     }
 
-    static func recognizeDocumentImage(_ image: CGImage, cancellation: OCRCancellation? = nil) throws -> OCRDocument {
+    static func recognizeDocumentImage(_ image: CGImage, cancellation: OCRCancellation? = nil,
+                                       maximumCharacters: Int? = TranslationText.maximumCharacters) throws -> OCRDocument {
         var lines: [OCRLine] = []
         let tileHeight = 1800, overlap = 180
         for coreTop in stride(from: 0, to: image.height, by: tileHeight) {
@@ -131,7 +132,7 @@ enum TextRecognizer {
         }
         guard !lines.isEmpty else { throw TranslationFailure.noText }
         let document = TextLayout.document(lines: lines, imageSize: CGSize(width: image.width, height: image.height))
-        guard document.text.count <= TranslationText.maximumCharacters else { throw TranslationFailure.tooLong }
+        if let maximumCharacters, document.text.count > maximumCharacters { throw TranslationFailure.tooLong }
         return document
     }
 

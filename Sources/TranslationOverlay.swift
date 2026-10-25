@@ -57,7 +57,8 @@ import AppKit
         toolbar.onOriginal = { [weak self] in
             guard let self else { return }; self.original.toggle(); self.refresh()
         }
-        toolbar.onCopy = { [weak self] in self?.copyText() }
+        toolbar.onCopy = { [weak self] in self?.copyText(original: false) }
+        toolbar.onCopyOriginal = { [weak self] in self?.copyText(original: true) }
         toolbar.onRetry = { [weak self] in self?.retry() }
         toolbar.onSettings = { [weak self] in self?.onSettings?() }
         toolbar.onCancel = { [weak self] in self?.close() }
@@ -104,8 +105,8 @@ import AppKit
         toolbar.originalButton.isEnabled = !workflow.original.isEmpty
         toolbar.originalButton.state = original ? .on : .off
         toolbar.originalButton.title = original ? "显示译文" : "查看原文"
-        toolbar.copyButton.title = original ? "复制原文" : "复制译文"
-        toolbar.copyButton.isEnabled = original ? !workflow.original.isEmpty : workflow.phase == .finished
+        toolbar.copyOriginalButton.isEnabled = !workflow.original.isEmpty
+        toolbar.copyButton.isEnabled = workflow.phase == .finished
         toolbar.retryButton.isHidden = true
         toolbar.status.textColor = .screenClipSecondaryLabel
         if workflow.phase.isBusy { toolbar.spinner.startAnimation(nil) } else { toolbar.spinner.stopAnimation(nil) }
@@ -129,11 +130,12 @@ import AppKit
         }
     }
 
-    private func copyText() {
-        guard toolbar?.copyButton.isEnabled == true else { return }
+    private func copyText(original: Bool) {
+        guard original ? !workflow.original.isEmpty : workflow.phase == .finished else { return }
         let text = original ? workflow.original : workflow.translated
         board.clearContents()
-        toolbar?.status.stringValue = board.setString(text, forType: .string) ? "已复制" : "复制失败，请重试。"
+        toolbar?.status.stringValue = board.setString(text, forType: .string)
+            ? (original ? "已复制原文" : "已复制译文") : "复制失败，请重试。"
     }
 
     private func retry() {
@@ -161,9 +163,10 @@ import AppKit
     let status = NSTextField(wrappingLabelWithString: "")
     let spinner = NSProgressIndicator()
     let originalButton = NSButton(title: "查看原文", target: nil, action: nil)
+    let copyOriginalButton = NSButton(title: "复制原文", target: nil, action: nil)
     let copyButton = NSButton(title: "复制译文", target: nil, action: nil)
     let retryButton = NSButton(title: "重试", target: nil, action: nil)
-    var onOriginal: (() -> Void)?, onCopy: (() -> Void)?, onRetry: (() -> Void)?, onSettings: (() -> Void)?
+    var onOriginal: (() -> Void)?, onCopyOriginal: (() -> Void)?, onCopy: (() -> Void)?, onRetry: (() -> Void)?, onSettings: (() -> Void)?
 
     init() {
         super.init(contentRect: CGRect(x: 0, y: 0, width: 540, height: 64), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -188,15 +191,18 @@ import AppKit
         let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "关闭原位翻译")!, target: self, action: #selector(closeAction))
         settings.toolTip = "翻译设置"; close.toolTip = "关闭（Esc）"
         originalButton.setButtonType(.toggle)
-        for button in [originalButton, copyButton, retryButton, settings, close] {
+        for button in [originalButton, copyOriginalButton, copyButton, retryButton, settings, close] {
             button.bezelStyle = .rounded; button.controlSize = .small; button.font = .systemFont(ofSize: 12)
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
         originalButton.target = self; originalButton.action = #selector(originalAction)
+        copyOriginalButton.target = self; copyOriginalButton.action = #selector(copyOriginalAction)
         copyButton.target = self; copyButton.action = #selector(copyAction)
         retryButton.target = self; retryButton.action = #selector(retryAction)
-        for view in [spinner, status, retryButton, originalButton, copyButton, settings, close] { row.addArrangedSubview(view) }
+        for view in [spinner, status, retryButton, originalButton, copyOriginalButton, copyButton, settings, close] { row.addArrangedSubview(view) }
     }
     @objc private func originalAction() { onOriginal?() }
+    @objc private func copyOriginalAction() { onCopyOriginal?() }
     @objc private func copyAction() { onCopy?() }
     @objc private func retryAction() { onRetry?() }
     @objc private func settingsAction() { onSettings?() }

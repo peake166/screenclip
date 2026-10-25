@@ -6,6 +6,7 @@ enum CaptureHotKeyID {
     static let scrollCancel: UInt32 = 3
     static let translationCancel: UInt32 = 5
     static let selectionCancel: UInt32 = 7
+    static let resultCancel: UInt32 = 8
 }
 
 enum ShortcutAction: String, CaseIterable {

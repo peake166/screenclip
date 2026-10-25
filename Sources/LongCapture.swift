@@ -23,6 +23,7 @@ final class LongCapture {
     private let logger = Logger(subsystem: "com.local.screenclip", category: "ScrollCapture")
     var onEnd: ((String?) -> Void)?
     var onTranslate: ((Raster) -> Void)?
+    var onCopied: ((Raster, String) -> Void)?
 
     init(region: CaptureRegion, finishShortcut: String? = "⌃⌥⌘5", targetApplicationPID: Int32? = nil) {
         self.region = region; self.targetApplicationPID = targetApplicationPID
@@ -177,8 +178,9 @@ final class LongCapture {
             try ImageClipboard.copy(image)
             logger.notice("Scroll capture copied; size: \(image.width)x\(image.height); segments: \(self.frameCount)")
             let message = "已复制\(frameCount > 1 ? "长图" : "图片") · \(image.width) × \(image.height)"
-            close(); onEnd?(translate ? nil : message)
+            close(); onEnd?(translate || onCopied != nil ? nil : message)
             if translate { onTranslate?(image) }
+            else { onCopied?(image, message) }
         } catch {
             guard !stopped else { return }
             finishing = false; panel.finishButton.isEnabled = true; panel.translateButton.isEnabled = true
