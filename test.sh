@@ -6,6 +6,9 @@ xcrun swiftc -O -swift-version 5 -framework AppKit Sources/Appearance.swift Sour
 .build/clipboard-window-tests
 xcrun swiftc -O -swift-version 5 -framework AppKit Sources/Appearance.swift Sources/Clipboard*.swift Tests/ClipboardPickerInteractionTests.swift -o .build/clipboard-picker-interaction-tests
 .build/clipboard-picker-interaction-tests
+xcrun swiftc -O -swift-version 5 -framework AppKit Sources/Appearance.swift Sources/Clipboard*.swift Tests/ClipboardPreviewCacheTests.swift -o .build/clipboard-preview-cache-tests
+.build/clipboard-preview-cache-tests
+.build/clipboard-preview-cache-tests --real-idle
 xcrun swiftc -O -swift-version 5 -framework AppKit -framework Carbon -framework ServiceManagement Sources/Shortcuts.swift Sources/ShortcutRecorder.swift Sources/LoginItem.swift Sources/Appearance.swift Sources/MainWindow.swift Tests/WindowAppearanceTests.swift -o .build/window-appearance-tests
 .build/window-appearance-tests
 xcrun swiftc -O -framework AppKit Sources/ClipboardCapture.swift Tests/ClipboardCaptureTests.swift -o .build/clipboard-capture-tests

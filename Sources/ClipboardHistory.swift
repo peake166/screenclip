@@ -151,16 +151,16 @@ final class ClipboardHistory {
     func loadPreview(_ id: UUID, maximumPixelSize: Int = 1200, completion: @escaping (ClipboardHistoryPreview?) -> Void) {
         guard let store else { completion(nil); return }
         worker.async {
-            let result: ClipboardHistoryPreview?
-            if let snapshot = try? store.read(id) {
+            let result: ClipboardHistoryPreview? = autoreleasepool {
+                guard let snapshot = try? store.read(id) else { return nil }
                 var image: CGImage?
                 if let data = snapshot.imageData, let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) {
                     image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
                         kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary)
                 }
                 let text = snapshot.text
-                result = ClipboardHistoryPreview(text: String(text.prefix(100_000)) + (text.count > 100_000 ? "\n\n预览已截短，粘贴保留完整内容。" : ""), image: image)
-            } else { result = nil }
+                return ClipboardHistoryPreview(text: String(text.prefix(100_000)) + (text.count > 100_000 ? "\n\n预览已截短，粘贴保留完整内容。" : ""), image: image)
+            }
             DispatchQueue.main.async { completion(result) }
         }
     }

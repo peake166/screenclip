@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 
 private final class ClipboardRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
@@ -54,8 +55,11 @@ private final class CachedClipboardPreview: NSObject {
 
 @MainActor
 final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSWindowDelegate {
+    typealias PreviewLoader = (UUID, Int, @escaping (ClipboardHistoryPreview?) -> Void) -> Void
     private enum Row { case group(String), entry(ClipboardHistoryEntry) }
     private let history: ClipboardHistory
+    private let loadPreview: PreviewLoader
+    private let previewIdleDelay: TimeInterval
     private let search = NSSearchField()
     private let table = ClipboardListTable()
     private let record = NSButton()
@@ -80,6 +84,10 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
     private var previewToken = UUID(), sessionToken = UUID()
     private let previewCache = NSCache<NSUUID, CachedClipboardPreview>()
     private let thumbnailCache = NSCache<NSUUID, NSImage>()
+    private var imagePreviewIDs: Set<UUID> = []
+    private var previewCacheEpoch = UUID()
+    private var idlePreviewRelease: DispatchWorkItem?
+    private var idlePreviewToken = UUID()
     private var previewID: UUID?
     private var targetName: String?
     private var busy = false, hidingForAction = false
@@ -88,8 +96,10 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
     var onAction: ((ClipboardPrimaryAction) -> Void)?
     var onDismiss: (() -> Void)?
 
-    init(history: ClipboardHistory) {
+    init(history: ClipboardHistory, previewIdleDelay: TimeInterval = 60, previewLoader: PreviewLoader? = nil) {
         self.history = history
+        self.previewIdleDelay = previewIdleDelay
+        loadPreview = previewLoader ?? { id, size, completion in history.loadPreview(id, maximumPixelSize: size, completion: completion) }
         super.init(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
             styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable, .closable], backing: .buffered, defer: false)
         title = "剪贴板"; titleVisibility = .hidden; titlebarAppearsTransparent = true; isReleasedWhenClosed = false
@@ -191,19 +201,50 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         history.onChange = { [weak self] in if self?.isVisible == true { self?.refresh() } }
         center(); refresh()
     }
+    deinit { idlePreviewRelease?.cancel() }
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        schedulePreviewRelease()
+    }
+    private func schedulePreviewRelease() {
+        guard idlePreviewRelease == nil else { return }
+        let delay = previewIdleDelay
+        let token = UUID(); idlePreviewToken = token
+        let release = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+            guard let self, self.idlePreviewToken == token else { return }
+            self.idlePreviewRelease = nil
+            guard !self.isVisible else { return }
+            // Invalidate decoders that were queued before this reclamation.
+            let hadImages = !self.imagePreviewIDs.isEmpty || self.image.image != nil
+            self.previewCacheEpoch = UUID(); self.previewToken = UUID(); self.previewID = nil
+            for id in self.imagePreviewIDs { self.previewCache.removeObject(forKey: id as NSUUID) }
+            self.imagePreviewIDs.removeAll()
+            self.image.image = nil; self.image.isHidden = true; self.textScroll.isHidden = false
+            if hadImages {
+                Logger(subsystem: "com.local.screenclip", category: "Clipboard").notice("Idle clipboard image previews released")
+            }
+            }
+        }
+        idlePreviewRelease = release
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, delay), execute: release)
+    }
     private func pin(_ view: NSView, in parent: NSView) {
         view.translatesAutoresizingMaskIntoConstraints = false; parent.addSubview(view)
         NSLayoutConstraint.activate([view.leadingAnchor.constraint(equalTo: parent.leadingAnchor), view.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
             view.topAnchor.constraint(equalTo: parent.topAnchor), view.bottomAnchor.constraint(equalTo: parent.bottomAnchor)])
     }
     func present(targetName: String? = nil) {
+        idlePreviewToken = UUID()
+        idlePreviewRelease?.cancel(); idlePreviewRelease = nil
         self.targetName = targetName; sessionToken = UUID(); busy = false; hidingForAction = false
         pendingAction = nil; selectingLatestOnOpen = true
         // Capture before focusing the picker so a just-copied item keeps its source application.
         history.poll()
-        search.stringValue = ""; filters.selectedSegment = 0; previewID = nil; refresh()
+        // A payload is immutable: keep a warm or pending preview when the same item is reopened.
+        search.stringValue = ""; filters.selectedSegment = 0; refresh()
         orderFrontRegardless(); makeKey(); makeFirstResponder(search)
     }
     func refresh() {
@@ -288,7 +329,7 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
             cell.icon.image = NSImage(systemSymbolName: entry.hasImage ? "photo" : "doc.text", accessibilityDescription: nil)
             if entry.hasImage {
                 if let image = thumbnailCache.object(forKey: entry.id as NSUUID) { cell.icon.image = image }
-                else { history.loadPreview(entry.id, maximumPixelSize: 80) { [weak self, weak cell] preview in
+                else { loadPreview(entry.id, 80) { [weak self, weak cell] preview in
                     guard let cg = preview?.image else { return }; let image = NSImage(cgImage: cg, size: .zero)
                     self?.thumbnailCache.setObject(image, forKey: entry.id as NSUUID, cost: cg.bytesPerRow * cg.height)
                     if cell?.entryID == entry.id { cell?.icon.image = image }
@@ -343,7 +384,10 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         if let sheet = attachedSheet { endSheet(sheet); sheet.orderOut(nil); return }
         dismiss(); onDismiss?()
     }
-    func windowWillClose(_ notification: Notification) { sessionToken = UUID(); pendingAction = nil; selectingLatestOnOpen = false; onDismiss?() }
+    func windowWillClose(_ notification: Notification) {
+        sessionToken = UUID(); pendingAction = nil; selectingLatestOnOpen = false
+        schedulePreviewRelease(); onDismiss?()
+    }
     func windowDidResignKey(_ notification: Notification) {
         guard isVisible, !hidingForAction, attachedSheet == nil, NSApp.modalWindow == nil else { return }
         // Outside clicks dismiss the picker without reactivating the previous application.
@@ -365,19 +409,30 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         image.image = nil; image.isHidden = true; textScroll.isHidden = false; preview.string = entry?.text ?? ""
         guard let entry else { return }
         if let cached = previewCache.object(forKey: entry.id as NSUUID) { showPreview(cached.value); return }
-        history.loadPreview(entry.id) { [weak self] value in
-            guard let self else { return }
+        if entry.hasImage, let thumbnail = thumbnailCache.object(forKey: entry.id as NSUUID) {
+            image.image = thumbnail; image.isHidden = false; textScroll.isHidden = true
+        }
+        let epoch = previewCacheEpoch
+        loadPreview(entry.id, 1200) { [weak self] value in
+            guard let self, self.previewCacheEpoch == epoch else { return }
             if let value {
                 let cost = (value.image.map { $0.bytesPerRow * $0.height } ?? 0) + value.text.utf8.count
                 self.previewCache.setObject(CachedClipboardPreview(value), forKey: entry.id as NSUUID, cost: cost)
+                if value.image != nil { self.imagePreviewIDs.insert(entry.id) }
             }
             guard self.previewToken == token else { return }
-            if let value { self.showPreview(value) } else { self.preview.string = "这条历史无法预览，请重新复制或删除。" }
+            if let value { self.showPreview(value) }
+            else {
+                self.previewID = nil; self.image.image = nil; self.image.isHidden = true; self.textScroll.isHidden = false
+                self.preview.string = "这条历史无法预览，请重新复制或删除。"
+            }
         }
     }
     private func showPreview(_ value: ClipboardHistoryPreview) {
-        if let cg = value.image { image.image = NSImage(cgImage: cg, size: .zero); image.isHidden = false; textScroll.isHidden = true }
-        else { preview.string = value.text.isEmpty ? "此格式可直接粘贴使用。" : value.text; image.isHidden = true; textScroll.isHidden = false }
+        autoreleasepool {
+            if let cg = value.image { image.image = NSImage(cgImage: cg, size: .zero); image.isHidden = false; textScroll.isHidden = true }
+            else { preview.string = value.text.isEmpty ? "此格式可直接粘贴使用。" : value.text; image.isHidden = true; textScroll.isHidden = false }
+        }
     }
     @objc private func changeFilter() { selectingLatestOnOpen = false; pendingAction = nil; previewID = nil; refresh() }
     @objc private func toggleRecording() { history.setRecording(!history.settings.isRecording) }
@@ -404,7 +459,7 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
     @objc private func pinSelected() { if let entry = selectedEntry { history.setPinned(entry.id, !entry.pinned) } }
     @objc private func deleteSelected() {
         guard let entry = selectedEntry else { return }
-        if !entry.pinned { previewCache.removeObject(forKey: entry.id as NSUUID); history.remove(entry.id); return }
+        if !entry.pinned { previewCache.removeObject(forKey: entry.id as NSUUID); imagePreviewIDs.remove(entry.id); history.remove(entry.id); return }
         let alert = NSAlert(); alert.messageText = "删除这条置顶内容？"; alert.informativeText = "删除后无法恢复。"
         alert.addButton(withTitle: "删除"); alert.addButton(withTitle: "取消")
         alert.beginSheetModal(for: self) { [weak self] response in if response == .alertFirstButtonReturn { self?.history.remove(entry.id) } }
@@ -416,7 +471,10 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         alert.informativeText = includingPinned ? "所有历史和置顶内容都会删除，无法恢复。系统剪贴板中的当前内容保持不变。" : "置顶内容会保留。系统剪贴板中的当前内容保持不变。"
         alert.addButton(withTitle: includingPinned ? "全部删除" : "清空普通历史"); alert.addButton(withTitle: "取消")
         alert.beginSheetModal(for: self) { [weak self] response in
-            if response == .alertFirstButtonReturn { self?.previewCache.removeAllObjects(); self?.thumbnailCache.removeAllObjects(); self?.history.clear(includingPinned: includingPinned) }
+            if response == .alertFirstButtonReturn {
+                self?.previewCacheEpoch = UUID(); self?.imagePreviewIDs.removeAll()
+                self?.previewCache.removeAllObjects(); self?.thumbnailCache.removeAllObjects(); self?.history.clear(includingPinned: includingPinned)
+            }
         }
     }
     @objc private func openActions() {
