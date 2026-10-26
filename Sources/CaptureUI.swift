@@ -9,6 +9,11 @@ struct CaptureRegion {
     let rect: CGRect
 }
 
+struct CaptureSelection {
+    let region: CaptureRegion
+    let image: Raster?
+}
+
 @MainActor
 final class CaptureSource {
     private var filter: SCContentFilter
@@ -126,61 +131,137 @@ final class CaptureSource {
 
 @MainActor
 final class SelectionController {
-    private var windows: [NSWindow] = []
-    private var completion: ((CaptureRegion?) -> Void)?
+    private(set) var windows: [NSWindow] = []
+    private var completion: ((Result<CaptureSelection?, Error>) -> Void)?
     private var localKeyMonitor: Any?
     private let screens: () -> [NSScreen]
+    private let captureSnapshots: @MainActor ([NSScreen]) async throws -> [FrozenScreenFrame]
+    private let presentWindows: Bool
     private let cancelKeys = HotKeys()
+    private let preparationTimeout: TimeInterval
+    private var preparation: Task<Void, Never>?
+    private var deadline: DispatchWorkItem?
+    private var generation = UUID()
+    private var frozenScreens: [FrozenScreenFrame] = []
 
-    init(screens: @escaping () -> [NSScreen] = { NSScreen.screens }) {
-        self.screens = screens
+    init(screens: @escaping () -> [NSScreen] = { NSScreen.screens }, presentWindows: Bool = true,
+         preparationTimeout: TimeInterval = 10,
+         captureSnapshots: @escaping @MainActor ([NSScreen]) async throws -> [FrozenScreenFrame] = FrozenScreenCapture.capture) {
+        self.screens = screens; self.presentWindows = presentWindows; self.captureSnapshots = captureSnapshots
+        self.preparationTimeout = preparationTimeout
     }
 
-    func begin(scrolling: Bool, completion: @escaping (CaptureRegion?) -> Void) {
-        if self.completion != nil { end(nil) }
+    func begin(scrolling: Bool, completion: @escaping (Result<CaptureSelection?, Error>) -> Void) {
+        if self.completion != nil { cancel() }
         self.completion = completion
         // Capture can start while another app still owns keyboard focus.
         // Reserve Escape before presenting any selection windows, then release it on completion.
         cancelKeys.register(id: CaptureHotKeyID.selectionCancel, key: UInt32(kVK_Escape), modifiers: 0) { [weak self] in
-            self?.end(nil)
+            self?.cancel()
         }
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == kVK_Escape { self?.end(nil); return nil }
+            if event.keyCode == kVK_Escape { self?.cancel(); return nil }
             return event
         }
-        for screen in screens() {
+        let available = screens()
+        guard !available.isEmpty else { return }
+        if scrolling {
+            do { try present(available, snapshots: [], scrolling: true) }
+            catch { end(.failure(error)) }
+            return
+        }
+        // No selection window or app activation may precede this snapshot.
+        let token = UUID(); generation = token
+        let timeout = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == token else { return }
+                self.end(.failure(CaptureError.freezeTimeout))
+            }
+        }
+        deadline = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.001, preparationTimeout), execute: timeout)
+        let capture = captureSnapshots
+        preparation = Task { [weak self] in
+            do {
+                let snapshots = try await capture(available)
+                try Task.checkCancellation()
+                guard let self, self.generation == token, self.completion != nil else { return }
+                self.preparation = nil; self.deadline?.cancel(); self.deadline = nil
+                let current = self.screens()
+                guard Set(current.compactMap { FrozenScreenCapture.displayID($0) })
+                        == Set(available.compactMap { FrozenScreenCapture.displayID($0) }) else { throw CaptureError.missingDisplay }
+                try self.present(current, snapshots: snapshots, scrolling: false)
+            } catch {
+                guard let self, self.generation == token, self.completion != nil else { return }
+                self.end(.failure(error))
+            }
+        }
+    }
+
+    private func present(_ screens: [NSScreen], snapshots: [FrozenScreenFrame], scrolling: Bool) throws {
+        if !scrolling {
+            for screen in screens {
+                guard let id = FrozenScreenCapture.displayID(screen),
+                      snapshots.contains(where: { $0.displayID == id && $0.screenFrame == screen.frame }) else { throw CaptureError.missingDisplay }
+            }
+        }
+        frozenScreens = snapshots
+        for screen in screens {
             let window = SelectionWindow(contentRect: screen.frame, styleMask: .borderless,
                                          backing: .buffered, defer: false, screen: screen)
-            window.isOpaque = false; window.backgroundColor = .clear
+            window.isOpaque = !scrolling; window.backgroundColor = .clear
             window.level = .screenSaver
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.isReleasedWhenClosed = false
             window.acceptsMouseMovedEvents = true
             let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
             view.scrolling = scrolling
+            view.frozenImage = snapshots.first { $0.displayID == FrozenScreenCapture.displayID(screen) }?.image
             view.onComplete = { [weak self] rect in
                 let global = rect.offsetBy(dx: screen.frame.minX, dy: screen.frame.minY)
-                self?.end(CaptureRegion(screen: screen, rect: global))
+                self?.select(CaptureRegion(screen: screen, rect: global), scrolling: scrolling)
             }
-            window.onCancel = { [weak self] in self?.end(nil) }
+            window.onCancel = { [weak self] in self?.cancel() }
             window.contentView = view
             window.initialFirstResponder = view
             window.makeFirstResponder(view)
             windows.append(window)
-            window.makeKeyAndOrderFront(nil)
+            if presentWindows { window.makeKeyAndOrderFront(nil) }
         }
-        NSApp.activate(ignoringOtherApps: true)
+        if presentWindows { NSApp.activate(ignoringOtherApps: true) }
     }
 
-    private func end(_ region: CaptureRegion?) {
+    func cancel() { end(.success(nil)) }
+
+    private func select(_ region: CaptureRegion, scrolling: Bool) {
+        guard completion != nil else { return }
+        do {
+            var image: Raster?
+            if !scrolling {
+                guard let id = FrozenScreenCapture.displayID(region.screen),
+                      let frame = frozenScreens.first(where: { $0.displayID == id && $0.screenFrame == region.screen.frame }) else {
+                    throw CaptureError.missingDisplay
+                }
+                image = try frame.crop(region.rect)
+            }
+            end(.success(CaptureSelection(region: region, image: image)))
+        } catch { end(.failure(error)) }
+    }
+
+    private func end(_ result: Result<CaptureSelection?, Error>) {
         guard let callback = completion else { return }
         completion = nil
+        generation = UUID(); preparation?.cancel(); preparation = nil
+        deadline?.cancel(); deadline = nil
         cancelKeys.unregister(CaptureHotKeyID.selectionCancel)
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
         localKeyMonitor = nil
-        for window in windows { window.orderOut(nil); window.close() }
-        windows.removeAll()
-        callback(region)
+        for window in windows {
+            (window.contentView as? SelectionView)?.frozenImage = nil
+            window.orderOut(nil); window.close()
+        }
+        windows.removeAll(); frozenScreens.removeAll()
+        callback(result)
     }
 }
 
@@ -194,8 +275,9 @@ private final class SelectionWindow: NSWindow {
     }
 }
 
-private final class SelectionView: NSView {
+final class SelectionView: NSView {
     var scrolling = false
+    var frozenImage: CGImage? { didSet { needsDisplay = true } }
     var onComplete: ((CGRect) -> Void)?
     private var start: CGPoint?
     private var selection = CGRect.zero
@@ -218,9 +300,17 @@ private final class SelectionView: NSView {
         else { start = nil; selection = .zero; needsDisplay = true }
     }
     override func draw(_ dirtyRect: NSRect) {
+        autoreleasepool { drawSelection() }
+    }
+    private func drawSelection() {
+        if let frozenImage { NSImage(cgImage: frozenImage, size: bounds.size).draw(in: bounds) }
         NSColor.black.withAlphaComponent(0.25).setFill(); bounds.fill()
         if selection.width > 0 {
-            NSColor.clear.setFill(); selection.fill(using: .copy)
+            if let frozenImage {
+                NSGraphicsContext.saveGraphicsState(); NSBezierPath(rect: selection).addClip()
+                NSImage(cgImage: frozenImage, size: bounds.size).draw(in: bounds)
+                NSGraphicsContext.restoreGraphicsState()
+            } else { NSColor.clear.setFill(); selection.fill(using: .copy) }
             NSColor.screenClipAccent.setStroke()
             let path = NSBezierPath(rect: selection.insetBy(dx: 0.5, dy: 0.5))
             path.lineWidth = 1.5; path.stroke()

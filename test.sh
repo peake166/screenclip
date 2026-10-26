@@ -4,6 +4,8 @@ cd "${0:A:h}"
 mkdir -p .build
 xcrun swiftc -O -swift-version 5 -framework AppKit Sources/Appearance.swift Sources/Clipboard*.swift Tests/ClipboardHistoryWindowTests.swift -o .build/clipboard-window-tests
 .build/clipboard-window-tests
+xcrun swiftc -O -swift-version 5 -framework AppKit Sources/Appearance.swift Sources/Clipboard*.swift Tests/ClipboardLongContentTests.swift -o .build/clipboard-long-content-tests
+.build/clipboard-long-content-tests
 xcrun swiftc -O -swift-version 5 -framework AppKit Sources/Appearance.swift Sources/Clipboard*.swift Tests/ClipboardPickerInteractionTests.swift -o .build/clipboard-picker-interaction-tests
 .build/clipboard-picker-interaction-tests
 xcrun swiftc -O -swift-version 5 -framework AppKit Sources/Appearance.swift Sources/Clipboard*.swift Tests/ClipboardPreviewCacheTests.swift -o .build/clipboard-preview-cache-tests
@@ -52,6 +54,10 @@ selection_sources=(Sources/*.swift)
 selection_sources=(${selection_sources:#Sources/main.swift})
 xcrun swiftc -O -swift-version 5 -framework AppKit -framework ScreenCaptureKit -framework Carbon -framework SwiftUI -framework Translation -framework Vision -framework NaturalLanguage -framework Security -framework ServiceManagement ${selection_sources[@]} Tests/SelectionCancelTests.swift -o .build/selection-cancel-tests
 .build/selection-cancel-tests
+xcrun swiftc -O -framework AppKit -framework ScreenCaptureKit Sources/Stitcher.swift Sources/Raster.swift Sources/FrozenScreenCapture.swift Tests/FrozenScreenFrameTests.swift -o .build/frozen-frame-tests
+.build/frozen-frame-tests
+xcrun swiftc -O -swift-version 5 -framework AppKit -framework ScreenCaptureKit -framework Carbon -framework SwiftUI -framework Translation -framework Vision -framework NaturalLanguage -framework Security -framework ServiceManagement ${selection_sources[@]} Tests/FrozenSelectionTests.swift -o .build/frozen-selection-tests
+.build/frozen-selection-tests
 xcrun swiftc -O -framework AppKit -framework Carbon -framework ServiceManagement Sources/Shortcuts.swift Sources/ShortcutRecorder.swift Sources/LoginItem.swift Sources/Appearance.swift Sources/MainWindow.swift Tests/Preview.swift -o .build/ui-preview
 .build/ui-preview
 xcrun swiftc -O Sources/TranslationModel.swift Tests/TranslationModelTests.swift -o .build/translation-model-tests

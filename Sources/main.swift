@@ -345,46 +345,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         priorApplication?.activate(options: [])
     }
 
+    private func selectRegion(scrolling: Bool, completion: @escaping (CaptureSelection) -> Void) {
+        selecting = true
+        selector.begin(scrolling: scrolling) { [weak self] result in
+            guard let self else { return }
+            self.restoreTarget()
+            defer { self.selecting = false }
+            switch result {
+            case .success(let selected): if let selected { completion(selected) }
+            case .failure(let error): self.showError(error.localizedDescription)
+            }
+        }
+    }
+
     @objc func captureSingle() {
         guard session == nil else { showToast("请先完成或取消当前滚动截图"); return }
         guard ready() else { return }
-        let targetPID = priorApplication?.processIdentifier
-        selecting = true
-        selector.begin(scrolling: false) { [weak self] region in
+        selectRegion(scrolling: false) { [weak self] selected in
             guard let self else { return }
-            self.restoreTarget()
-            guard let region else { self.selecting = false; return }
-            Task {
-                defer { self.selecting = false }
-                do {
-                    let source = try await CaptureSource(region: region, targetApplicationPID: targetPID)
-                    defer { source.stop() }
-                    let image = try await source.grab()
-                    try ImageClipboard.copy(image)
-                    self.captureResult.show(image, region: region, message: "已复制图片")
-                } catch { self.showError(error.localizedDescription) }
-            }
+            do {
+                guard let image = selected.image else { throw CaptureError.noImage }
+                try ImageClipboard.copy(image)
+                self.captureResult.show(image, region: selected.region, message: "已复制图片")
+            } catch { self.showError(error.localizedDescription) }
         }
     }
 
     @objc func captureTranslate() {
         guard session == nil else { showToast("请先完成或取消当前滚动截图"); return }
         guard ready() else { return }
-        let targetPID = priorApplication?.processIdentifier
-        selecting = true
-        selector.begin(scrolling: false) { [weak self] region in
+        selectRegion(scrolling: false) { [weak self] selected in
             guard let self else { return }
-            self.restoreTarget()
-            guard let region else { self.selecting = false; return }
-            Task {
-                defer { self.selecting = false }
-                do {
-                    let source = try await CaptureSource(region: region, targetApplicationPID: targetPID)
-                    defer { source.stop() }
-                    let image = try await source.grab()
-                    self.translateInPlace(image, region: region)
-                } catch { self.showError(error.localizedDescription) }
-            }
+            guard let image = selected.image else { self.showError(CaptureError.noImage.localizedDescription); return }
+            self.translateInPlace(image, region: selected.region)
         }
     }
 
@@ -392,11 +385,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let session { Task { await session.finish() }; return }
         guard ready() else { return }
         let targetPID = priorApplication?.processIdentifier
-        selecting = true
-        selector.begin(scrolling: true) { [weak self] region in
+        selectRegion(scrolling: true) { [weak self] selected in
             guard let self else { return }
-            self.selecting = false; self.restoreTarget()
-            guard let region else { return }
+            let region = selected.region
             let capture = LongCapture(region: region, finishShortcut: self.preferences.bindings[.scroll]?.display,
                                       targetApplicationPID: targetPID)
             self.session = capture
@@ -448,13 +439,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        selector.cancel()
         captureResult.close()
         clipboardHistory.stop(); clipboardPaster.cancel()
         Task { await clipboardHistory.flush(); NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
     func applicationWillTerminate(_ notification: Notification) { clipboardHistory.stop() }
-    @objc func quit() { captureResult.close(); clipboardHistory.stop(); clipboardPaster.cancel(); clipboardWindow?.close(); session?.cancel(); translationOverlay?.close(); translationWindow?.close(); translationSettingsWindow?.close(); NSApp.terminate(nil) }
+    @objc func quit() { selector.cancel(); captureResult.close(); clipboardHistory.stop(); clipboardPaster.cancel(); clipboardWindow?.close(); session?.cancel(); translationOverlay?.close(); translationWindow?.close(); translationSettingsWindow?.close(); NSApp.terminate(nil) }
 }
 
 MainActor.assumeIsolated {

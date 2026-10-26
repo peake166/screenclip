@@ -36,9 +36,9 @@ import Carbon
         for scrolling in [false, true, false] {
             var completions = 0
             var returnedRegion = false
-            selection.begin(scrolling: scrolling) { region in
+            selection.begin(scrolling: scrolling) { result in
                 completions += 1
-                returnedRegion = region != nil
+                switch result { case .success(let selected): returnedRegion = selected != nil; case .failure: returnedRegion = true }
             }
             let before = normalActions
             dispatch(900)

@@ -1,6 +1,19 @@
 import AppKit
 import OSLog
 
+// Content fills an assigned viewport; its natural width must not size the panel.
+private final class ClipboardContentLabel: NSTextField {
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: super.intrinsicContentSize.height)
+    }
+}
+
+private final class ClipboardPreviewImage: NSImageView {
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+}
+
 private final class ClipboardRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
@@ -11,14 +24,15 @@ private final class ClipboardRowView: NSTableRowView {
 
 private final class ClipboardCell: NSTableCellView {
     let icon = NSImageView()
-    let name = NSTextField(labelWithString: "")
-    let meta = NSTextField(labelWithString: "")
+    let name = ClipboardContentLabel(labelWithString: "")
+    let meta = ClipboardContentLabel(labelWithString: "")
     let pinned = NSImageView(image: NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "已置顶")!)
     var entryID: UUID?
     override init(frame: NSRect) {
         super.init(frame: frame)
         name.font = .systemFont(ofSize: 13, weight: .medium); name.lineBreakMode = .byTruncatingTail
         meta.font = .systemFont(ofSize: 11); meta.textColor = .screenClipSecondaryLabel; meta.lineBreakMode = .byTruncatingTail
+        for label in [name, meta] { label.maximumNumberOfLines = 1; label.usesSingleLineMode = true }
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.contentTintColor = .screenClipSecondaryLabel
         pinned.contentTintColor = .screenClipSecondaryLabel
@@ -66,12 +80,12 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
     private let status = NSTextField(labelWithString: "")
     private let empty = NSTextField(wrappingLabelWithString: "")
     private let preview = NSTextView()
-    private let previewTitle = NSTextField(labelWithString: "")
-    private let previewSource = NSTextField(labelWithString: "")
+    private let previewTitle = ClipboardContentLabel(labelWithString: "")
+    private let previewSource = ClipboardContentLabel(labelWithString: "")
     private let expiry = NSTextField(labelWithString: "")
     private let format = NSTextField(labelWithString: "")
     private let textScroll = NSScrollView()
-    private let image = NSImageView()
+    private let image = ClipboardPreviewImage()
     private let primary = NSButton(title: "粘贴", target: nil, action: nil)
     private let actions = NSButton(title: "操作  ⌘K", target: nil, action: nil)
     private let hint = NSTextField(labelWithString: "⌘↵ 仅复制")
@@ -111,6 +125,13 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         previewCache.totalCostLimit = 32 * 1024 * 1024; previewCache.countLimit = 80
         thumbnailCache.totalCostLimit = 4 * 1024 * 1024; thumbnailCache.countLimit = 150
         let root = FrostedSurface(); contentView = root
+        // NSWindow.maxSize only limits manual resizing; Auto Layout also needs bounds.
+        NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: minSize.width),
+            root.widthAnchor.constraint(lessThanOrEqualToConstant: maxSize.width),
+            root.heightAnchor.constraint(greaterThanOrEqualToConstant: minSize.height),
+            root.heightAnchor.constraint(lessThanOrEqualToConstant: maxSize.height)
+        ])
         let brand = NSTextField(labelWithString: "截图助手  /  剪贴板")
         brand.font = .systemFont(ofSize: 12, weight: .medium); brand.textColor = .screenClipSecondaryLabel
         record.target = self; record.action = #selector(toggleRecording); record.isBordered = false; record.font = .systemFont(ofSize: 11)
@@ -124,23 +145,27 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         filters.selectedSegment = 0; filters.selectedSegmentBezelColor = .screenClipAccent; filters.segmentStyle = .rounded; filters.controlSize = .small
         filters.target = self; filters.action = #selector(changeFilter); filters.setAccessibilityLabel("剪贴板内容类型")
 
-        let list = NSScrollView(); list.hasVerticalScroller = true; list.autohidesScrollers = true; list.drawsBackground = false
+        let list = NSScrollView(); list.hasVerticalScroller = true; list.autohidesScrollers = true
+        list.drawsBackground = true; list.backgroundColor = .textBackgroundColor
+        list.wantsLayer = true; list.layer?.cornerRadius = 12; list.layer?.masksToBounds = true
         table.addTableColumn(NSTableColumn(identifier: .init("entry")))
         table.headerView = nil; table.intercellSpacing = NSSize(width: 0, height: 2)
-        table.style = .plain; table.backgroundColor = .clear; table.selectionHighlightStyle = .regular
+        table.style = .plain; table.backgroundColor = .textBackgroundColor; table.selectionHighlightStyle = .regular
         table.dataSource = self; table.delegate = self; table.target = self; table.doubleAction = #selector(defaultAction)
         table.onActivate = { [weak self] in self?.defaultAction() }
         table.onCopy = { [weak self] in self?.copyOnly() }
         table.onCancel = { [weak self] in self?.cancelOperation(nil) }
         table.setAccessibilityLabel("剪贴板历史列表"); list.documentView = table
-        let detail = ReadableSurface()
+        list.contentView.drawsBackground = true; list.contentView.backgroundColor = .textBackgroundColor
+        let detail = ReadableSurface(); detail.usesOpaqueBackground = true
         previewTitle.font = .systemFont(ofSize: 16, weight: .medium); previewTitle.lineBreakMode = .byTruncatingTail
         previewSource.font = .systemFont(ofSize: 11); previewSource.textColor = .screenClipSecondaryLabel; previewSource.lineBreakMode = .byTruncatingTail
+        for label in [previewTitle, previewSource] { label.maximumNumberOfLines = 1; label.usesSingleLineMode = true }
         pinPreview.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "置顶")
         pinPreview.isBordered = false; pinPreview.target = self; pinPreview.action = #selector(pinSelected)
         pinPreview.setAccessibilityLabel("置顶或取消置顶")
         pinPreview.toolTip = "置顶或取消置顶  ⇧⌘P"
-        let detailHeader = NSStackView(views: [previewSource, NSView(), pinPreview]); detailHeader.alignment = .centerY
+        let detailHeader = NSStackView(views: [previewSource, pinPreview]); detailHeader.alignment = .centerY
         preview.isEditable = false; preview.isSelectable = true; preview.drawsBackground = false
         preview.font = .systemFont(ofSize: 13); preview.textColor = .labelColor
         preview.textContainerInset = NSSize(width: 0, height: 8)

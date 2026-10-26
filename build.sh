@@ -34,8 +34,8 @@ cat > .build/App/Contents/Info.plist <<'PLIST'
 <key>CFBundleName</key><string>截图助手</string>
 <key>CFBundleDisplayName</key><string>截图助手</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.9.1</string>
-<key>CFBundleVersion</key><string>26</string>
+<key>CFBundleShortVersionString</key><string>1.9.4</string>
+<key>CFBundleVersion</key><string>29</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>

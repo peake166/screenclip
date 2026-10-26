@@ -63,12 +63,13 @@ final class FrostedSurface: NSView {
     }
 }
 
-/// Lift readable content slightly above the window's glass without an opaque white block.
+/// Reading surfaces can opt into a solid background while retaining the outer glass.
 @MainActor
 final class ReadableSurface: NSView {
     var radius: CGFloat = 12
+    var usesOpaqueBackground = false { didSet { needsDisplay = true } }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.textBackgroundColor.withAlphaComponent(0.30).setFill()
+        NSColor.textBackgroundColor.withAlphaComponent(usesOpaqueBackground ? 1 : 0.30).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
         NSColor.separatorColor.withAlphaComponent(0.32).setStroke()
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)

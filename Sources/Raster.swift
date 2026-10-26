@@ -3,7 +3,7 @@ import CoreGraphics
 import Foundation
 
 enum CaptureError: LocalizedError {
-    case invalidImage, missingDisplay, invalidSelection, noImage, busy
+    case invalidImage, missingDisplay, invalidSelection, noImage, busy, freezeTimeout
     var errorDescription: String? {
         switch self {
         case .invalidImage: return "无法读取截图，请重新框选。"
@@ -11,6 +11,7 @@ enum CaptureError: LocalizedError {
         case .invalidSelection: return "截图区域太小，请重新框选。"
         case .noImage: return "还没有可复制的截图。"
         case .busy: return "截图正在处理中，请稍后重试。"
+        case .freezeTimeout: return "准备截图超时，请重试。"
         }
     }
 }

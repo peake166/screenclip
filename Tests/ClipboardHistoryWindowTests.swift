@@ -102,6 +102,14 @@ import AppKit
             let detailRect = detail.convert(detail.bounds, to: window.contentView!)
             check(detailRect.width > 300 && abs(detailRect.maxX - (bounds.maxX - 16)) < 1,
                   "preview fills the available trailing pane instead of collapsing to its intrinsic text width")
+            for (name, pane) in [("history list", table.enclosingScrollView! as NSView), ("content preview", detail as NSView)] {
+                let pixels = pane.bitmapImageRepForCachingDisplay(in: pane.bounds)!
+                appearance.performAsCurrentDrawingAppearance { pane.cacheDisplay(in: pane.bounds, to: pixels) }
+                let x = Int(12 * CGFloat(pixels.pixelsWide) / pane.bounds.width)
+                let samples = [pixels.pixelsHigh / 2, pixels.pixelsHigh - 20].map { pixels.colorAt(x: x, y: $0)!.alphaComponent }
+                check(samples.allSatisfy { $0 > 0.99 },
+                      "\(dark ? "dark" : "light") \(name) has an opaque reading background")
+            }
             let view = window.contentView!
             if let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                 func invalidate(_ view: NSView) { view.needsDisplay = true; view.subviews.forEach(invalidate) }
@@ -109,6 +117,14 @@ import AppKit
                     invalidate(view)
                     appearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: bitmap) }
                 }
+                // A window-backed visual effect can composite desktop pixels into an opaque bitmap.
+                // Verify the live glass configuration; its isolated rendering is covered by WindowAppearanceTests.
+                let glass = all(view).compactMap { $0 as? NSVisualEffectView }.first
+                let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+                check(view is FrostedSurface && !window.isOpaque && window.backgroundColor.alphaComponent == 0
+                      && window.alphaValue == 1 && view.alphaValue == 1 && glass?.blendingMode == .behindWindow
+                      && glass?.isHidden == reduce && (glass?.alphaValue ?? 1) < 1,
+                      "the outer picker chrome keeps its glass treatment independently of reading panes")
                 try bitmap.representation(using: .png, properties: [:])!.write(to: previews.appendingPathComponent("clipboard-\(dark ? "dark" : "light").png"))
             }
         }
