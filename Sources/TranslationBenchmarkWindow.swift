@@ -15,10 +15,10 @@ final class TranslationBenchmarkWindow: NSWindow, NSWindowDelegate, NSTableViewD
     var onClosed: (() -> Void)?
     private let table = NSTableView()
     private let progress = NSTextField(labelWithString: "")
-    private let mode = NSSegmentedControl(labels: ["测试原文", "译文"], trackingMode: .selectOne, target: nil, action: nil)
+    private let mode = PillSegmentedControl(titles: ["测试原文", "译文"])
     private let detail = NSTextView()
-    private let start = NSButton(title: "开始测速", target: nil, action: nil)
-    private let use = NSButton(title: "使用此模型", target: nil, action: nil)
+    private let start = PillActionButton(title: "开始测速", symbolName: "play.fill", style: .tinted(.indigo))
+    private let use = PillActionButton(title: "使用此模型", style: .primary(.blue))
     private let feedback = NSTextField(wrappingLabelWithString: "")
     private let root = NSStackView()
     private var rows: [TranslationBenchmarkEntry] = []
@@ -29,23 +29,26 @@ final class TranslationBenchmarkWindow: NSWindow, NSWindowDelegate, NSTableViewD
         self.benchmark = benchmark
         super.init(contentRect: NSRect(x: 0, y: 0, width: 650, height: 540),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        title = "模型测速"; delegate = self; isReleasedWhenClosed = false
-        let surface = FrostedSurface(); contentView = surface
+        title = "模型测速"; titlebarAppearsTransparent = true; delegate = self; isReleasedWhenClosed = false
+        let surface = FrostedSurface(radius: 16); contentView = surface
         root.orientation = .vertical; root.alignment = .leading; root.spacing = 12
         root.translatesAutoresizingMaskIntoConstraints = false; surface.addSubview(root)
         NSLayoutConstraint.activate([
             root.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 20),
             root.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -20),
-            root.topAnchor.constraint(equalTo: surface.topAnchor, constant: 18)
+            root.topAnchor.constraint(equalTo: surface.topAnchor, constant: 16)
         ])
-        let language = NSTextField(labelWithString: (benchmark.settings.target == .english ? "中文" : "英文") + " → " + benchmark.settings.target.title)
-        language.font = .systemFont(ofSize: 13, weight: .medium)
-        progress.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular); progress.textColor = .screenClipSecondaryLabel
+        let language = TagPillView(
+            text: (benchmark.settings.target == .english ? "中文" : "英文") + " → " + benchmark.settings.target.title,
+            symbolName: "gauge.with.dots.needle.67percent",
+            tone: .indigo
+        )
+        progress.font = .monospacedDigitSystemFont(ofSize: 11.5, weight: .medium); progress.textColor = .screenClipSecondaryLabel
         progress.setAccessibilityLabel("测速进度")
         let heading = NSStackView(views: [language, NSView(), progress]); heading.alignment = .centerY
         root.addArrangedSubview(heading)
 
-        for (id, title, width) in [("model", "模型", 250.0), ("time", "耗时", 80.0), ("speed", "原文/秒", 85.0), ("state", "结果", 170.0)] {
+        for (id, title, width) in [("model", "模型", 240.0), ("time", "耗时", 80.0), ("speed", "原文/秒", 85.0), ("state", "结果", 170.0)] {
             let column = NSTableColumn(identifier: .init(id)); column.title = title; column.width = width
             column.minWidth = width; column.maxWidth = id == "model" ? 400 : width
             column.resizingMask = id == "model" ? .autoresizingMask : []
@@ -60,7 +63,7 @@ final class TranslationBenchmarkWindow: NSWindow, NSWindowDelegate, NSTableViewD
         let columns = NSStackView(); columns.alignment = .centerY; columns.spacing = 0
         for column in table.tableColumns {
             let label = NSTextField(labelWithString: column.title)
-            label.font = .systemFont(ofSize: 11, weight: .medium); label.textColor = .screenClipSecondaryLabel
+            label.font = .systemFont(ofSize: 11, weight: .semibold); label.textColor = .screenClipSecondaryLabel
             label.toolTip = column.headerToolTip
             let holder = NSView(); label.translatesAutoresizingMaskIntoConstraints = false; holder.addSubview(label)
             NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: column.identifier.rawValue == "model" ? 8 : 0),
@@ -68,17 +71,34 @@ final class TranslationBenchmarkWindow: NSWindow, NSWindowDelegate, NSTableViewD
             if column.identifier.rawValue != "model" { holder.widthAnchor.constraint(equalToConstant: column.width).isActive = true }
             columns.addArrangedSubview(holder)
         }
-        columns.heightAnchor.constraint(equalToConstant: 18).isActive = true; root.addArrangedSubview(columns)
+        columns.heightAnchor.constraint(equalToConstant: 26).isActive = true
         let list = NSScrollView(); list.documentView = table; list.hasVerticalScroller = true
         list.autohidesScrollers = true; list.drawsBackground = false; list.borderType = .noBorder
         list.heightAnchor.constraint(equalToConstant: CGFloat(min(6, max(1, benchmark.entries.count))) * 43).isActive = true
-        root.addArrangedSubview(list)
+
+        let tableCard = InsetCardView(radius: 12)
+        tableCard.translatesAutoresizingMaskIntoConstraints = false
+        let tableDivider = HairlineDivider(vertical: false)
+        let tableStack = NSStackView(views: [columns, tableDivider, list])
+        tableStack.orientation = .vertical; tableStack.alignment = .leading; tableStack.spacing = 0
+        tableStack.translatesAutoresizingMaskIntoConstraints = false
+        tableCard.addSubview(tableStack)
+        NSLayoutConstraint.activate([
+            tableStack.leadingAnchor.constraint(equalTo: tableCard.leadingAnchor, constant: 6),
+            tableStack.trailingAnchor.constraint(equalTo: tableCard.trailingAnchor, constant: -6),
+            tableStack.topAnchor.constraint(equalTo: tableCard.topAnchor, constant: 4),
+            tableStack.bottomAnchor.constraint(equalTo: tableCard.bottomAnchor, constant: -4),
+            columns.widthAnchor.constraint(equalTo: tableStack.widthAnchor),
+            tableDivider.widthAnchor.constraint(equalTo: tableStack.widthAnchor),
+            list.widthAnchor.constraint(equalTo: tableStack.widthAnchor)
+        ])
+        root.addArrangedSubview(tableCard)
         if benchmark.entries.isEmpty {
             let empty = NSTextField(wrappingLabelWithString: "先在翻译设置中填写硅基流动或智谱的 API 密钥。")
             empty.font = .systemFont(ofSize: 12); empty.textColor = .screenClipSecondaryLabel
             root.addArrangedSubview(empty)
         }
-        mode.selectedSegment = 0; mode.controlSize = .small; mode.segmentStyle = .rounded
+        mode.selectedSegment = 0
         mode.target = self; mode.action = #selector(changePreview)
         mode.setAccessibilityLabel("测试原文或译文预览")
         root.addArrangedSubview(mode)
@@ -104,15 +124,15 @@ final class TranslationBenchmarkWindow: NSWindow, NSWindowDelegate, NSTableViewD
         root.addArrangedSubview(note)
         feedback.font = .systemFont(ofSize: 12); feedback.textColor = .systemRed; feedback.isHidden = true
         feedback.setAccessibilityLabel("测速操作状态"); root.addArrangedSubview(feedback)
-        let close = NSButton(title: "关闭", target: self, action: #selector(closePressed)); close.keyEquivalent = "\u{1b}"
-        start.target = self; start.action = #selector(startOrStop); start.contentTintColor = .screenClipAccent
+        let close = PillActionButton(title: "关闭", style: .subtle, target: self, action: #selector(closePressed))
+        close.keyEquivalent = "\u{1b}"; close.fixedHeight = 30; close.horizontalPadding = 14
+        start.target = self; start.action = #selector(startOrStop); start.fixedHeight = 30; start.horizontalPadding = 12
         start.setAccessibilityLabel("开始或停止模型测速")
-        use.target = self; use.action = #selector(useModel); use.contentTintColor = .screenClipAccent
+        use.target = self; use.action = #selector(useModel); use.fixedHeight = 30; use.horizontalPadding = 14
         use.setAccessibilityLabel("使用选中的测速模型")
-        for button in [close, start, use] { button.bezelStyle = .rounded }
         let footer = NSStackView(views: [start, NSView(), close, use]); footer.spacing = 8; footer.alignment = .centerY
         root.addArrangedSubview(footer)
-        for view in root.arrangedSubviews { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
+        for view in root.arrangedSubviews where view !== mode { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
         benchmark.onChange = { [weak self] in self?.reload() }
         reload(); resizeToFit()
     }

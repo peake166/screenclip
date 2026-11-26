@@ -20,8 +20,8 @@ final class ShortcutRecorder: NSControl {
         toolTip = "点击录制；Esc 取消，Delete 清除"
         setAccessibilityHelp("按下组合键以修改，Esc 取消，Delete 清除")
         translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: 154).isActive = true
-        heightAnchor.constraint(equalToConstant: 32).isActive = true
+        widthAnchor.constraint(equalToConstant: 124).isActive = true
+        heightAnchor.constraint(equalToConstant: 26).isActive = true
         label.alignment = .center; label.translatesAutoresizingMaskIntoConstraints = false
         label.setAccessibilityElement(false); addSubview(label)
         NSLayoutConstraint.activate([
@@ -39,7 +39,7 @@ final class ShortcutRecorder: NSControl {
     override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
     private func updateLabel() {
         label.stringValue = isRecording ? (heldModifiers == 0 ? "按下组合键…" : Shortcut.modifierSymbols(heldModifiers) + "…") : shortcut?.display ?? "未设置"
-        label.font = .systemFont(ofSize: isRecording ? 12 : 13, weight: .medium)
+        label.font = isRecording ? .systemFont(ofSize: 11.5, weight: .medium) : .monospacedSystemFont(ofSize: 12, weight: .medium)
         label.textColor = isRecording ? .screenClipAccent : (shortcut == nil ? .tertiaryLabelColor : .labelColor)
         needsDisplay = true
     }
@@ -87,10 +87,10 @@ final class ShortcutRecorder: NSControl {
     override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
         let focus = window?.firstResponder === self
-        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 8, yRadius: 8)
-        (isRecording ? NSColor.screenClipAccent.withAlphaComponent(0.09) : NSColor.controlBackgroundColor.withAlphaComponent(0.7)).setFill()
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.75, dy: 0.75), xRadius: 7, yRadius: 7)
+        (isRecording ? ScreenClipTone.blue.softBackground : NSColor.screenClipKeycapFill).setFill()
         shape.fill()
-        (isRecording || focus ? NSColor.screenClipAccent : NSColor.separatorColor.withAlphaComponent(0.6)).setStroke()
-        shape.lineWidth = isRecording || focus ? 1.5 : 0.7; shape.stroke()
+        (isRecording || focus ? NSColor.screenClipAccent : NSColor.screenClipKeycapBorder).setStroke()
+        shape.lineWidth = isRecording || focus ? 1.4 : 0.8; shape.stroke()
     }
 }

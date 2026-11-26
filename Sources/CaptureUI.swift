@@ -151,7 +151,7 @@ final class SelectionController {
         self.preparationTimeout = preparationTimeout
     }
 
-    func begin(scrolling: Bool, completion: @escaping (Result<CaptureSelection?, Error>) -> Void) {
+    func begin(scrolling: Bool, prompt: String? = nil, completion: @escaping (Result<CaptureSelection?, Error>) -> Void) {
         if self.completion != nil { cancel() }
         self.completion = completion
         // Capture can start while another app still owns keyboard focus.
@@ -166,7 +166,7 @@ final class SelectionController {
         let available = screens()
         guard !available.isEmpty else { return }
         if scrolling {
-            do { try present(available, snapshots: [], scrolling: true) }
+            do { try present(available, snapshots: [], scrolling: true, prompt: prompt) }
             catch { end(.failure(error)) }
             return
         }
@@ -190,7 +190,7 @@ final class SelectionController {
                 let current = self.screens()
                 guard Set(current.compactMap { FrozenScreenCapture.displayID($0) })
                         == Set(available.compactMap { FrozenScreenCapture.displayID($0) }) else { throw CaptureError.missingDisplay }
-                try self.present(current, snapshots: snapshots, scrolling: false)
+                try self.present(current, snapshots: snapshots, scrolling: false, prompt: prompt)
             } catch {
                 guard let self, self.generation == token, self.completion != nil else { return }
                 self.end(.failure(error))
@@ -198,7 +198,7 @@ final class SelectionController {
         }
     }
 
-    private func present(_ screens: [NSScreen], snapshots: [FrozenScreenFrame], scrolling: Bool) throws {
+    private func present(_ screens: [NSScreen], snapshots: [FrozenScreenFrame], scrolling: Bool, prompt: String? = nil) throws {
         if !scrolling {
             for screen in screens {
                 guard let id = FrozenScreenCapture.displayID(screen),
@@ -216,6 +216,7 @@ final class SelectionController {
             window.acceptsMouseMovedEvents = true
             let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
             view.scrolling = scrolling
+            view.promptText = prompt
             view.frozenImage = snapshots.first { $0.displayID == FrozenScreenCapture.displayID(screen) }?.image
             view.onComplete = { [weak self] rect in
                 let global = rect.offsetBy(dx: screen.frame.minX, dy: screen.frame.minY)
@@ -277,6 +278,7 @@ private final class SelectionWindow: NSWindow {
 
 final class SelectionView: NSView {
     var scrolling = false
+    var promptText: String?
     var frozenImage: CGImage? { didSet { needsDisplay = true } }
     var onComplete: ((CGRect) -> Void)?
     private var start: CGPoint?
@@ -315,20 +317,23 @@ final class SelectionView: NSView {
             let path = NSBezierPath(rect: selection.insetBy(dx: 0.5, dy: 0.5))
             path.lineWidth = 1.5; path.stroke()
         }
-        let text = scrolling ? "框选要滚动的内容区域 · Esc 取消" : "框选截图区域，松开后复制 · Esc 取消"
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 16, weight: .medium), .foregroundColor: NSColor.white]
+        let text = promptText ?? (scrolling ? "框选要滚动的内容区域 · Esc 取消" : "框选截图区域，松开后复制 · Esc 取消")
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 14, weight: .medium), .foregroundColor: NSColor.white]
         let size = (text as NSString).size(withAttributes: attrs)
-        let point = CGPoint(x: (bounds.width - size.width) / 2, y: bounds.height - 86)
-        let plate = CGRect(x: point.x - 18, y: point.y - 11, width: size.width + 36, height: size.height + 22)
-        NSColor.black.withAlphaComponent(0.8).setFill(); NSBezierPath(roundedRect: plate, xRadius: 12, yRadius: 12).fill()
+        let point = CGPoint(x: (bounds.width - size.width) / 2, y: bounds.height - 82)
+        let plate = CGRect(x: point.x - 18, y: point.y - 9, width: size.width + 36, height: size.height + 18)
+        let platePath = NSBezierPath(roundedRect: plate, xRadius: plate.height / 2, yRadius: plate.height / 2)
+        NSColor.black.withAlphaComponent(0.76).setFill(); platePath.fill()
+        NSColor.white.withAlphaComponent(0.18).setStroke(); platePath.lineWidth = 0.8; platePath.stroke()
         (text as NSString).draw(at: point, withAttributes: attrs)
         if selection.width > 0 {
             let dimensions = "\(Int(selection.width)) × \(Int(selection.height))"
-            let attr: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.white]
+            let attr: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium), .foregroundColor: NSColor.white]
             let sz = (dimensions as NSString).size(withAttributes: attr)
-            let p = CGPoint(x: selection.minX + 7, y: max(8, selection.minY - 25))
-            NSColor.black.withAlphaComponent(0.8).setFill()
-            NSBezierPath(roundedRect: CGRect(x: p.x - 5, y: p.y - 3, width: sz.width + 10, height: sz.height + 6), xRadius: 4, yRadius: 4).fill()
+            let p = CGPoint(x: selection.minX + 8, y: max(8, selection.minY - 26))
+            let badge = NSBezierPath(roundedRect: CGRect(x: p.x - 6, y: p.y - 3, width: sz.width + 12, height: sz.height + 6), xRadius: 6, yRadius: 6)
+            NSColor.black.withAlphaComponent(0.76).setFill(); badge.fill()
+            NSColor.white.withAlphaComponent(0.16).setStroke(); badge.lineWidth = 0.7; badge.stroke()
             (dimensions as NSString).draw(at: p, withAttributes: attr)
         }
     }
@@ -338,41 +343,64 @@ final class SelectionView: NSView {
 final class ScrollPanel: NSPanel {
     let message = NSTextField(labelWithString: "准备截图…")
     let progress = NSTextField(labelWithString: "")
-    let finishButton = NSButton(title: "复制长图", target: nil, action: nil)
-    let translateButton = NSButton(title: "翻译长图", target: nil, action: nil)
+    let finishButton = PillActionButton(title: "复制长图", symbolName: "doc.on.doc", style: .primary(.blue))
+    let translateButton = PillActionButton(title: "翻译长图", symbolName: "character.bubble", style: .tinted(.indigo))
     var onFinish: (() -> Void)?
     var onTranslate: (() -> Void)?
     var onCancel: (() -> Void)?
 
     init(region: CaptureRegion, finishShortcut: String? = "⌃⌥⌘5") {
         let available = region.screen.visibleFrame
-        var origin = CGPoint(x: min(max(region.rect.minX, available.minX + 8), available.maxX - 482),
+        let panelWidth: CGFloat = 468, panelHeight: CGFloat = 94
+        var origin = CGPoint(x: min(max(region.rect.minX, available.minX + 8), available.maxX - panelWidth - 8),
                              y: region.rect.maxY + 10)
-        if origin.y + 104 > available.maxY { origin.y = max(available.minY + 10, region.rect.minY - 114) }
-        super.init(contentRect: CGRect(origin: origin, size: CGSize(width: 474, height: 104)),
+        if origin.y + panelHeight > available.maxY { origin.y = max(available.minY + 10, region.rect.minY - panelHeight - 10) }
+        super.init(contentRect: CGRect(origin: origin, size: CGSize(width: panelWidth, height: panelHeight)),
                    styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
         title = "滚动截图"
         hidesOnDeactivate = false
         level = .floating; isOpaque = false; backgroundColor = .clear
         hasShadow = true; isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let effect = FrostedSurface(frame: CGRect(x: 0, y: 0, width: 474, height: 104), radius: 14)
+        let effect = FrostedSurface(frame: CGRect(x: 0, y: 0, width: panelWidth, height: panelHeight), radius: 16)
         contentView = effect
-        message.frame = CGRect(x: 16, y: 68, width: 442, height: 20)
-        message.font = .systemFont(ofSize: 13, weight: .medium)
-        progress.frame = CGRect(x: 16, y: 37, width: 190, height: 20)
-        progress.textColor = .screenClipSecondaryLabel; progress.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+
+        let dot = NSView()
+        dot.wantsLayer = true; dot.layer?.cornerRadius = 3.5; dot.layer?.backgroundColor = ScreenClipTone.teal.foreground.cgColor
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.widthAnchor.constraint(equalToConstant: 7).isActive = true
+        dot.heightAnchor.constraint(equalToConstant: 7).isActive = true
+
+        message.font = .systemFont(ofSize: 13, weight: .semibold); message.textColor = .labelColor
+        message.lineBreakMode = .byTruncatingTail
+        progress.textColor = .screenClipSecondaryLabel; progress.font = .monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
+        progress.setContentHuggingPriority(.required, for: .horizontal)
+        let topRow = NSStackView(views: [dot, message, NSView(), progress])
+        topRow.orientation = .horizontal; topRow.alignment = .centerY; topRow.spacing = 8
+
         let hint = NSTextField(labelWithString: finishShortcut.map { $0 + " 完成 · Esc 取消" } ?? "Esc 取消")
-        hint.frame = CGRect(x: 16, y: 10, width: 185, height: 18)
         hint.font = .systemFont(ofSize: 11); hint.textColor = .screenClipSecondaryLabel
-        finishButton.target = self; finishButton.action = #selector(finish)
-        finishButton.bezelStyle = .rounded
-        finishButton.frame = CGRect(x: 360, y: 14, width: 102, height: 32)
-        let cancel = NSButton(title: "取消", target: self, action: #selector(cancelCapture))
-        cancel.bezelStyle = .rounded; cancel.frame = CGRect(x: 204, y: 14, width: 64, height: 32)
+
+        let cancel = PillActionButton(title: "取消", style: .subtle, target: self, action: #selector(cancelCapture))
+        cancel.fixedHeight = 30; cancel.horizontalPadding = 11
         translateButton.target = self; translateButton.action = #selector(translateCapture)
-        translateButton.bezelStyle = .rounded; translateButton.frame = CGRect(x: 270, y: 14, width: 88, height: 32)
-        [message, progress, hint, finishButton, cancel, translateButton].forEach { effect.addSubview($0) }
+        translateButton.fixedHeight = 30; translateButton.horizontalPadding = 11
+        finishButton.target = self; finishButton.action = #selector(finish)
+        finishButton.fixedHeight = 30; finishButton.horizontalPadding = 12
+
+        let bottomRow = NSStackView(views: [hint, NSView(), cancel, translateButton, finishButton])
+        bottomRow.orientation = .horizontal; bottomRow.alignment = .centerY; bottomRow.spacing = 7
+
+        let root = NSStackView(views: [topRow, bottomRow])
+        root.orientation = .vertical; root.alignment = .leading; root.spacing = 12
+        root.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(root)
+        NSLayoutConstraint.activate([
+            root.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 16),
+            root.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -16),
+            root.centerYAnchor.constraint(equalTo: effect.centerYAnchor),
+            topRow.widthAnchor.constraint(equalTo: root.widthAnchor),
+            bottomRow.widthAnchor.constraint(equalTo: root.widthAnchor)
+        ])
     }
     @objc private func finish() { onFinish?() }
     @objc private func cancelCapture() { onCancel?() }

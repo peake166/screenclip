@@ -1,52 +1,66 @@
 import AppKit
 
-private final class CaptureActionButton: NSButton {
+private extension ShortcutAction {
+    var tone: ScreenClipTone {
+        switch self {
+        case .copy: return .blue
+        case .scroll: return .teal
+        case .translate: return .indigo
+        case .pinCapture: return .amber
+        case .pinClipboard: return .amber
+        case .clipboard: return .slate
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .copy: return "冻结画面并复制"
+        case .scroll: return "自动拼接长页面"
+        case .translate: return "原位覆盖显示译文"
+        case .pinCapture: return "常驻置顶悬浮窗"
+        case .pinClipboard: return "剪贴板图片"
+        case .clipboard: return "搜索与粘贴"
+        }
+    }
+
+    var compactDisplayTitle: String {
+        switch self {
+        case .pinClipboard: return "贴出剪贴板"
+        default: return title
+        }
+    }
+}
+
+@MainActor
+private final class HeroActionTile: NSButton {
     private let actionName: String
-    private let symbol: NSImage?
-    private let nameLabel = NSTextField(labelWithString: "")
-    private let shortcutLabel = NSTextField(labelWithString: "")
+    private let subtitleText: String
+    private let symbolName: String
+    private let tone: ScreenClipTone
     private var hovered = false
     private var tracking: NSTrackingArea?
+
     var shortcut: Shortcut? {
         didSet {
-            shortcutLabel.stringValue = shortcut?.display ?? ""
-            shortcutLabel.isHidden = shortcut == nil
             needsDisplay = true
             updateAccessibility()
         }
     }
 
-    init(action: ShortcutAction, symbolName: String) {
+    init(action: ShortcutAction) {
         actionName = action.title
-        symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 19, weight: .medium))
+        subtitleText = action.subtitle
+        symbolName = action.symbolName
+        tone = action.tone
         super.init(frame: .zero)
         title = ""; isBordered = false; setButtonType(.momentaryPushIn)
         focusRingType = .exterior
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 52).isActive = true
-        nameLabel.stringValue = actionName
-        nameLabel.font = .systemFont(ofSize: 14, weight: .medium)
-        nameLabel.textColor = .labelColor
-        shortcutLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        shortcutLabel.textColor = .screenClipSecondaryLabel
-        shortcutLabel.isHidden = true
-        shortcutLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        for label in [nameLabel, shortcutLabel] {
-            label.translatesAutoresizingMaskIntoConstraints = false
-            label.setAccessibilityElement(false)
-            addSubview(label)
-        }
-        NSLayoutConstraint.activate([
-            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 60),
-            nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutLabel.leadingAnchor, constant: -12),
-            shortcutLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -22),
-            shortcutLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ])
+        heightAnchor.constraint(equalToConstant: 92).isActive = true
         updateAccessibility()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
     private func updateAccessibility() {
         setAccessibilityLabel(actionName + (shortcut.map { "，快捷键 " + $0.display } ?? ""))
     }
@@ -59,33 +73,205 @@ private final class CaptureActionButton: NSButton {
     override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
     override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point) == nil ? nil : self
-    }
+    override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
+
     override func draw(_ dirtyRect: NSRect) {
         let pressed = isHighlighted
-        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
-        (hovered || pressed ? NSColor.screenClipAccent.withAlphaComponent(pressed ? 0.14 : 0.07) : NSColor.clear).setFill()
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 13, yRadius: 13)
+        let fill = pressed ? tone.softBackground : (hovered ? NSColor.screenClipCardHoverFill : NSColor.screenClipCardFill)
+        fill.setFill()
         shape.fill()
-        NSColor.separatorColor.withAlphaComponent(hovered ? 0.45 : 0).setStroke(); shape.lineWidth = 0.7; shape.stroke()
-        let tile = CGRect(x: 12, y: 8, width: 36, height: 36)
-        NSColor.screenClipAccent.withAlphaComponent(0.08).setFill()
-        NSBezierPath(roundedRect: tile, xRadius: 9, yRadius: 9).fill()
-        if let symbol {
-            let symbolColor = NSColor.screenClipAccent
-            let tinted = NSImage(size: symbol.size, flipped: false) { rect in
-                symbolColor.setFill(); rect.fill()
-                symbol.draw(in: rect, from: .zero, operation: .destinationIn, fraction: 1)
-                return true
-            }
-            let size = symbol.size
-            tinted.draw(in: CGRect(x: tile.midX - size.width / 2, y: tile.midY - size.height / 2, width: size.width, height: size.height))
+        let border = (hovered || pressed) ? tone.foreground.withAlphaComponent(pressed ? 0.55 : 0.38) : NSColor.screenClipCardBorder
+        border.setStroke()
+        shape.lineWidth = (hovered || pressed) ? 1.1 : 0.8
+        shape.stroke()
+
+        // NSButton uses a flipped coordinate system (y = 0 at top).
+        // Top-left semantic icon badge.
+        let badge = CGRect(x: 13, y: 12, width: 34, height: 34)
+        tone.softBackground.setFill()
+        NSBezierPath(roundedRect: badge, xRadius: 9, yRadius: 9).fill()
+        ScreenClipDrawing.drawSymbol(symbolName, pointSize: 16, weight: .semibold, color: tone.foreground, centeredIn: badge)
+
+        // Top-right keycap badge.
+        if let text = shortcut?.display {
+            let capSize = ScreenClipDrawing.keycapSize(for: text, fontSize: 11)
+            let capRect = CGRect(
+                x: bounds.width - 13 - capSize.width,
+                y: (badge.midY - capSize.height / 2).rounded(),
+                width: capSize.width,
+                height: capSize.height
+            )
+            ScreenClipDrawing.drawKeycap(text, in: capRect, fontSize: 11, emphasized: hovered)
         }
-        if !shortcutLabel.isHidden {
-            let badge = shortcutLabel.convert(shortcutLabel.bounds, to: self).insetBy(dx: -7, dy: -4)
-            NSColor.labelColor.withAlphaComponent(0.035).setFill()
-            NSBezierPath(roundedRect: badge, xRadius: 5, yRadius: 5).fill()
+
+        // Bottom title & subtitle.
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13.5, weight: .semibold),
+            .foregroundColor: NSColor.labelColor
+        ]
+        let subAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11.5, weight: .regular),
+            .foregroundColor: NSColor.screenClipSecondaryLabel
+        ]
+        (actionName as NSString).draw(at: CGPoint(x: 13, y: 52), withAttributes: titleAttrs)
+        (subtitleText as NSString).draw(at: CGPoint(x: 13, y: 70), withAttributes: subAttrs)
+    }
+}
+
+@MainActor
+private final class CompactStripActionButton: NSButton {
+    private let accessibilityName: String
+    private let displayName: String
+    private let fallbackMeta: String
+    private let symbolName: String
+    private let tone: ScreenClipTone
+    private var hovered = false
+    private var tracking: NSTrackingArea?
+
+    var shortcut: Shortcut? {
+        didSet {
+            needsDisplay = true
+            updateAccessibility()
         }
+    }
+
+    init(accessibilityName: String, displayName: String, fallbackMeta: String, symbolName: String, tone: ScreenClipTone) {
+        self.accessibilityName = accessibilityName
+        self.displayName = displayName
+        self.fallbackMeta = fallbackMeta
+        self.symbolName = symbolName
+        self.tone = tone
+        super.init(frame: .zero)
+        title = ""; isBordered = false; setButtonType(.momentaryPushIn)
+        focusRingType = .exterior
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: 80).isActive = true
+        updateAccessibility()
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func updateAccessibility() {
+        setAccessibilityLabel(accessibilityName + (shortcut.map { "，快捷键 " + $0.display } ?? ""))
+    }
+    override func updateTrackingAreas() {
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area); tracking = area
+        super.updateTrackingAreas()
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
+    override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let pressed = isHighlighted
+        if hovered || pressed {
+            let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let bg = pressed
+                ? tone.softBackground
+                : (dark ? NSColor.white.withAlphaComponent(0.065) : NSColor.black.withAlphaComponent(0.04))
+            bg.setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 10, yRadius: 10).fill()
+        }
+
+        // NSButton uses a flipped coordinate system (y = 0 at top).
+        let badge = CGRect(x: ((bounds.width - 28) / 2).rounded(), y: 11, width: 28, height: 28)
+        tone.softBackground.setFill()
+        NSBezierPath(roundedRect: badge, xRadius: 8, yRadius: 8).fill()
+        ScreenClipDrawing.drawSymbol(symbolName, pointSize: 13.5, weight: .semibold, color: tone.foreground, centeredIn: badge)
+
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12.5, weight: .medium),
+            .foregroundColor: NSColor.labelColor
+        ]
+        let tSize = (displayName as NSString).size(withAttributes: titleAttrs)
+        (displayName as NSString).draw(at: CGPoint(x: ((bounds.width - tSize.width) / 2).rounded(), y: 44), withAttributes: titleAttrs)
+
+        let metaText = shortcut?.display ?? fallbackMeta
+        let metaFont = shortcut != nil
+            ? NSFont.monospacedSystemFont(ofSize: 10.5, weight: .medium)
+            : NSFont.systemFont(ofSize: 10.5, weight: .regular)
+        let metaAttrs: [NSAttributedString.Key: Any] = [
+            .font: metaFont,
+            .foregroundColor: NSColor.screenClipSecondaryLabel
+        ]
+        let mSize = (metaText as NSString).size(withAttributes: metaAttrs)
+        (metaText as NSString).draw(at: CGPoint(x: ((bounds.width - mSize.width) / 2).rounded(), y: 61), withAttributes: metaAttrs)
+    }
+}
+
+@MainActor
+private final class StatusBadgeButton: NSButton {
+    var isGranted = false { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    private var hovered = false
+    private var tracking: NSTrackingArea?
+
+    init(target: AnyObject?, action: Selector) {
+        super.init(frame: .zero)
+        self.target = target; self.action = action
+        isBordered = false; focusRingType = .exterior
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityLabel("截图权限")
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private var labelText: String { isGranted ? "就绪" : "授权截图" }
+
+    override var intrinsicContentSize: NSSize {
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11.5, weight: .medium)]
+        let sz = (labelText as NSString).size(withAttributes: attrs)
+        return NSSize(width: ceil(sz.width) + 26, height: 22)
+    }
+    override func updateTrackingAreas() {
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area); tracking = area
+        super.updateTrackingAreas()
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let tone: ScreenClipTone = isGranted ? .green : .amber
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+        (hovered ? tone.hoverBackground : tone.softBackground).setFill()
+        path.fill()
+        tone.foreground.withAlphaComponent(hovered ? 0.38 : 0.18).setStroke()
+        path.lineWidth = 0.7; path.stroke()
+
+        let dot = CGRect(x: 8.5, y: ((bounds.height - 6) / 2).rounded(), width: 6, height: 6)
+        tone.foreground.setFill()
+        NSBezierPath(ovalIn: dot).fill()
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11.5, weight: .medium),
+            .foregroundColor: tone.foreground
+        ]
+        let sz = (labelText as NSString).size(withAttributes: attrs)
+        (labelText as NSString).draw(at: CGPoint(x: dot.maxX + 5, y: (bounds.midY - sz.height / 2).rounded()), withAttributes: attrs)
+    }
+}
+
+@MainActor
+private final class ShortcutIconBadge: NSView {
+    private let symbolName: String
+    private let tone: ScreenClipTone
+    init(symbolName: String, tone: ScreenClipTone) {
+        self.symbolName = symbolName; self.tone = tone
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 24).isActive = true
+        heightAnchor.constraint(equalToConstant: 24).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        tone.softBackground.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 6.5, yRadius: 6.5).fill()
+        ScreenClipDrawing.drawSymbol(symbolName, pointSize: 11.5, weight: .semibold, color: tone.foreground, centeredIn: bounds)
     }
 }
 
@@ -94,36 +280,35 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     var onCapture: ((ShortcutAction) -> Void)?
     var onPermission: (() -> Void)?
     var onTranslationSettings: (() -> Void)?
+    var onPinImageFile: (() -> Void)?
     var onLoginItemChange: ((Bool) -> Void)?
     var onLoginItemSettings: (() -> Void)?
     var onBeginRecording: (() -> Bool)?
     var onEndRecording: (() -> Void)?
     var onShortcutChange: ((ShortcutAction, Shortcut?) -> String?)?
     var onReset: (() -> String?)?
-    private let permission = NSButton()
-    private let toggle = NSButton()
-    private let loginItem = NSButton(checkboxWithTitle: "登录时启动", target: nil, action: nil)
+
+    private let permission = StatusBadgeButton(target: nil, action: #selector(permissionPressed))
+    private let tabs = SegmentedPillControl(titles: ["操作", "快捷键"])
+    private let loginItem = PillToggleSwitch(title: "登录时启动")
     private let loginItemApproval = NSButton(title: "允许…", target: nil, action: nil)
     private let feedback = NSTextField(labelWithString: "")
     private var recorders: [ShortcutAction: ShortcutRecorder] = [:]
-    private var captureButtons: [ShortcutAction: CaptureActionButton] = [:]
-    private let settings = NSStackView()
-    private var expanded = false
-    private var collapsedFrameHeight: CGFloat = 0
+    private var heroTiles: [ShortcutAction: HeroActionTile] = [:]
+    private var stripButtons: [ShortcutAction: CompactStripActionButton] = [:]
+    private let operationsPanel = NSStackView()
+    private let shortcutsPanel = NSStackView()
 
     init(icon: NSImage?) {
-        super.init(contentRect: CGRect(x: 0, y: 0, width: 420, height: 428),
+        super.init(contentRect: CGRect(x: 0, y: 0, width: 484, height: 404),
                    styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         title = "截图助手"; titleVisibility = .hidden; titlebarAppearsTransparent = true
         isReleasedWhenClosed = false; isMovableByWindowBackground = true
         delegate = self
-        let effect = FrostedSurface()
+        let effect = FrostedSurface(radius: 18)
         contentView = effect
-        let root = NSStackView()
-        root.orientation = .vertical; root.alignment = .leading; root.spacing = 12
-        root.translatesAutoresizingMaskIntoConstraints = false
-        effect.addSubview(root)
-        // Keep all native controls together above the full-size glass content.
+
+        // Keep native traffic-light window controls together at upper-left inside the glass surface.
         let windowControls = NSStackView()
         windowControls.orientation = .horizontal; windowControls.alignment = .centerY
         windowControls.distribution = .fill; windowControls.spacing = 9
@@ -145,107 +330,279 @@ final class MainWindow: NSWindow, NSWindowDelegate {
                 button.widthAnchor.constraint(equalToConstant: 14), button.heightAnchor.constraint(equalToConstant: 14)
             ])
         }
+
+        // Brand mark aligned beside traffic lights.
+        let iconView = NSImageView()
+        iconView.image = icon; iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        iconView.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        let brandName = NSTextField(labelWithString: "截图助手")
+        brandName.font = .systemFont(ofSize: 13, weight: .semibold)
+        brandName.textColor = .labelColor
+        let brand = NSStackView(views: [iconView, brandName])
+        brand.orientation = .horizontal; brand.spacing = 6; brand.alignment = .centerY
+        brand.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(brand)
+
+        tabs.onSelectionChange = { [weak self] index in self?.switchTab(index) }
+        effect.addSubview(tabs)
+
+        permission.target = self; permission.action = #selector(permissionPressed)
+        effect.addSubview(permission)
+
         NSLayoutConstraint.activate([
             windowControls.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 14),
-            windowControls.topAnchor.constraint(equalTo: effect.topAnchor, constant: 14)
+            windowControls.topAnchor.constraint(equalTo: effect.topAnchor, constant: 14),
+            brand.leadingAnchor.constraint(equalTo: windowControls.trailingAnchor, constant: 14),
+            brand.centerYAnchor.constraint(equalTo: windowControls.centerYAnchor),
+            tabs.centerXAnchor.constraint(equalTo: effect.centerXAnchor, constant: 14),
+            tabs.centerYAnchor.constraint(equalTo: windowControls.centerYAnchor),
+            permission.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -16),
+            permission.centerYAnchor.constraint(equalTo: windowControls.centerYAnchor)
         ])
-        NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 22),
-            root.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -22),
-            root.topAnchor.constraint(equalTo: effect.topAnchor, constant: 50)
-        ])
-        let image = NSImageView()
-        image.image = icon; image.imageScaling = .scaleProportionallyUpOrDown
-        image.widthAnchor.constraint(equalToConstant: 40).isActive = true
-        image.heightAnchor.constraint(equalToConstant: 40).isActive = true
-        let name = NSTextField(labelWithString: "截图助手")
-        name.font = .systemFont(ofSize: 18, weight: .medium)
-        permission.target = self; permission.action = #selector(permissionPressed)
-        permission.isBordered = false; permission.font = .systemFont(ofSize: 11, weight: .medium)
-        permission.setAccessibilityLabel("截图权限")
-        let spacer = NSView()
-        let header = NSStackView(views: [image, name, spacer, permission])
-        header.spacing = 9; header.alignment = .centerY
-        root.addArrangedSubview(header)
-        let buttons = NSStackView(); buttons.orientation = .vertical; buttons.spacing = 1
-        for action in ShortcutAction.allCases {
-            let button = CaptureActionButton(action: action, symbolName: action.symbolName)
-            button.target = self
-            switch action { case .copy: button.action = #selector(copyPressed); case .scroll: button.action = #selector(scrollPressed); case .translate: button.action = #selector(translatePressed); case .clipboard: button.action = #selector(clipboardPressed) }
-            captureButtons[action] = button; buttons.addArrangedSubview(button)
-            button.widthAnchor.constraint(equalTo: buttons.widthAnchor).isActive = true
+
+        // Main content slot (shared fixed height between Operations and Shortcuts tabs).
+        let bodyContainer = NSView()
+        bodyContainer.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(bodyContainer)
+
+        buildOperationsPanel()
+        buildShortcutsPanel()
+
+        for panel in [operationsPanel, shortcutsPanel] {
+            panel.translatesAutoresizingMaskIntoConstraints = false
+            bodyContainer.addSubview(panel)
+            NSLayoutConstraint.activate([
+                panel.leadingAnchor.constraint(equalTo: bodyContainer.leadingAnchor),
+                panel.trailingAnchor.constraint(equalTo: bodyContainer.trailingAnchor),
+                panel.topAnchor.constraint(equalTo: bodyContainer.topAnchor),
+                panel.bottomAnchor.constraint(lessThanOrEqualTo: bodyContainer.bottomAnchor)
+            ])
         }
-        root.addArrangedSubview(buttons)
-        let separator = NSBox(); separator.boxType = .separator
-        root.addArrangedSubview(separator)
-        toggle.title = "快捷键"; toggle.isBordered = false
-        toggle.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
-        toggle.imagePosition = .imageLeft; toggle.imageHugsTitle = true
-        toggle.contentTintColor = .screenClipSecondaryLabel; toggle.font = .systemFont(ofSize: 12, weight: .medium)
-        toggle.target = self; toggle.action = #selector(toggleSettings)
-        toggle.setAccessibilityLabel("快捷键设置")
-        let translationSettings = NSButton(title: "翻译设置…", target: self, action: #selector(translationSettingsPressed))
-        translationSettings.isBordered = false; translationSettings.font = .systemFont(ofSize: 12)
-        translationSettings.contentTintColor = .screenClipSecondaryLabel
-        let toggleRow = NSStackView(views: [toggle, NSView(), translationSettings]); toggleRow.heightAnchor.constraint(equalToConstant: 26).isActive = true
-        root.addArrangedSubview(toggleRow)
+        shortcutsPanel.isHidden = true
+
+        // Bottom utility bar.
+        let bottomDivider = HairlineDivider(vertical: false)
+        effect.addSubview(bottomDivider)
+
         loginItem.target = self; loginItem.action = #selector(loginItemPressed)
-        loginItem.font = .systemFont(ofSize: 12)
         loginItem.setAccessibilityLabel("登录时启动")
         loginItemApproval.target = self; loginItemApproval.action = #selector(loginItemSettingsPressed)
-        loginItemApproval.isBordered = false; loginItemApproval.font = .systemFont(ofSize: 12)
+        loginItemApproval.isBordered = false; loginItemApproval.font = .systemFont(ofSize: 12, weight: .medium)
         loginItemApproval.contentTintColor = .screenClipAccent
         loginItemApproval.setAccessibilityLabel("在系统设置中允许登录时启动")
         loginItemApproval.isHidden = true
-        let loginItemRow = NSStackView(views: [loginItem, NSView(), loginItemApproval])
-        loginItemRow.heightAnchor.constraint(equalToConstant: 26).isActive = true
-        root.addArrangedSubview(loginItemRow)
-        settings.orientation = .vertical; settings.alignment = .leading; settings.spacing = 10
-        for action in ShortcutAction.allCases {
+
+        let translationSettings = PillActionButton(
+            title: "翻译设置…",
+            symbolName: "gearshape",
+            style: .subtle,
+            target: self,
+            action: #selector(translationSettingsPressed)
+        )
+        translationSettings.fixedHeight = 26
+        translationSettings.horizontalPadding = 10
+
+        let footerBar = NSStackView(views: [loginItem, loginItemApproval, NSView(), translationSettings])
+        footerBar.orientation = .horizontal; footerBar.alignment = .centerY; footerBar.spacing = 8
+        footerBar.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(footerBar)
+
+        NSLayoutConstraint.activate([
+            bodyContainer.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 18),
+            bodyContainer.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -18),
+            bodyContainer.topAnchor.constraint(equalTo: effect.topAnchor, constant: 52),
+            bodyContainer.bottomAnchor.constraint(equalTo: bottomDivider.topAnchor, constant: -14),
+
+            bottomDivider.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
+            bottomDivider.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
+            bottomDivider.bottomAnchor.constraint(equalTo: footerBar.topAnchor, constant: -10),
+
+            footerBar.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 18),
+            footerBar.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -18),
+            footerBar.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -11),
+            footerBar.heightAnchor.constraint(equalToConstant: 28)
+        ])
+
+        center()
+    }
+
+    private func buildOperationsPanel() {
+        operationsPanel.orientation = .vertical
+        operationsPanel.alignment = .leading
+        operationsPanel.spacing = 12
+
+        // 2x2 Hero Tile Grid.
+        let row1 = makeHeroRow([.copy, .pinCapture])
+        let row2 = makeHeroRow([.translate, .scroll])
+        let grid = NSStackView(views: [row1, row2])
+        grid.orientation = .vertical; grid.spacing = 10; grid.alignment = .leading
+        operationsPanel.addArrangedSubview(grid)
+        grid.widthAnchor.constraint(equalTo: operationsPanel.widthAnchor).isActive = true
+        row1.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true
+        row2.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true
+
+        // Bottom 3-column InsetCard for Clipboard Pin, Pick Local File, Clipboard History.
+        let stripCard = InsetCardView(radius: 13)
+        stripCard.translatesAutoresizingMaskIntoConstraints = false
+        let pinClipBtn = CompactStripActionButton(
+            accessibilityName: ShortcutAction.pinClipboard.title,
+            displayName: ShortcutAction.pinClipboard.compactDisplayTitle,
+            fallbackMeta: ShortcutAction.pinClipboard.subtitle,
+            symbolName: ShortcutAction.pinClipboard.symbolName,
+            tone: ShortcutAction.pinClipboard.tone
+        )
+        pinClipBtn.target = self; pinClipBtn.action = #selector(pinClipboardPressed)
+        stripButtons[.pinClipboard] = pinClipBtn
+
+        let pickFileBtn = CompactStripActionButton(
+            accessibilityName: "选择本地图片贴到屏幕",
+            displayName: "选图贴屏…",
+            fallbackMeta: "本地图片",
+            symbolName: "folder",
+            tone: .blue
+        )
+        pickFileBtn.target = self; pickFileBtn.action = #selector(pinFilePressed)
+
+        let historyBtn = CompactStripActionButton(
+            accessibilityName: ShortcutAction.clipboard.title,
+            displayName: ShortcutAction.clipboard.compactDisplayTitle,
+            fallbackMeta: ShortcutAction.clipboard.subtitle,
+            symbolName: ShortcutAction.clipboard.symbolName,
+            tone: ShortcutAction.clipboard.tone
+        )
+        historyBtn.target = self; historyBtn.action = #selector(clipboardPressed)
+        stripButtons[.clipboard] = historyBtn
+
+        let sep1 = HairlineDivider(vertical: true)
+        let sep2 = HairlineDivider(vertical: true)
+        let stripRow = NSStackView(views: [pinClipBtn, sep1, pickFileBtn, sep2, historyBtn])
+        stripRow.orientation = .horizontal; stripRow.spacing = 0; stripRow.alignment = .centerY
+        stripRow.distribution = .fill
+        stripRow.translatesAutoresizingMaskIntoConstraints = false
+        stripCard.addSubview(stripRow)
+        NSLayoutConstraint.activate([
+            stripRow.leadingAnchor.constraint(equalTo: stripCard.leadingAnchor),
+            stripRow.trailingAnchor.constraint(equalTo: stripCard.trailingAnchor),
+            stripRow.topAnchor.constraint(equalTo: stripCard.topAnchor),
+            stripRow.bottomAnchor.constraint(equalTo: stripCard.bottomAnchor),
+            pinClipBtn.widthAnchor.constraint(equalTo: pickFileBtn.widthAnchor),
+            pickFileBtn.widthAnchor.constraint(equalTo: historyBtn.widthAnchor),
+            sep1.heightAnchor.constraint(equalTo: stripCard.heightAnchor, constant: -20),
+            sep2.heightAnchor.constraint(equalTo: stripCard.heightAnchor, constant: -20)
+        ])
+        operationsPanel.addArrangedSubview(stripCard)
+        stripCard.widthAnchor.constraint(equalTo: operationsPanel.widthAnchor).isActive = true
+    }
+
+    private func makeHeroRow(_ actions: [ShortcutAction]) -> NSStackView {
+        let tiles = actions.map { action -> HeroActionTile in
+            let tile = HeroActionTile(action: action)
+            tile.target = self
+            switch action {
+            case .copy: tile.action = #selector(copyPressed)
+            case .scroll: tile.action = #selector(scrollPressed)
+            case .translate: tile.action = #selector(translatePressed)
+            case .pinCapture: tile.action = #selector(pinCapturePressed)
+            case .pinClipboard: tile.action = #selector(pinClipboardPressed)
+            case .clipboard: tile.action = #selector(clipboardPressed)
+            }
+            heroTiles[action] = tile
+            return tile
+        }
+        let row = NSStackView(views: tiles)
+        row.orientation = .horizontal; row.spacing = 10; row.distribution = .fillEqually
+        return row
+    }
+
+    private func buildShortcutsPanel() {
+        shortcutsPanel.orientation = .vertical
+        shortcutsPanel.alignment = .leading
+        shortcutsPanel.spacing = 10
+
+        let card = InsetCardView(radius: 13)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        let list = NSStackView()
+        list.orientation = .vertical; list.alignment = .leading; list.spacing = 0
+        list.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(list)
+        NSLayoutConstraint.activate([
+            list.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            list.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            list.topAnchor.constraint(equalTo: card.topAnchor),
+            list.bottomAnchor.constraint(equalTo: card.bottomAnchor)
+        ])
+
+        for (index, action) in ShortcutAction.allCases.enumerated() {
+            if index > 0 {
+                let divider = HairlineDivider(vertical: false)
+                list.addArrangedSubview(divider)
+                divider.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+            }
+            let badge = ShortcutIconBadge(symbolName: action.symbolName, tone: action.tone)
             let label = NSTextField(labelWithString: action.title)
-            label.font = .systemFont(ofSize: 12); label.textColor = .screenClipSecondaryLabel
+            label.font = .systemFont(ofSize: 12.5, weight: .medium)
+            label.textColor = .labelColor
             let recorder = ShortcutRecorder()
             recorder.setAccessibilityLabel(action.title + "快捷键")
-            recorder.onBegin = { [weak self] in
-                guard let self else { return false }
-                return self.onBeginRecording?() ?? true
-            }
+            recorder.onBegin = { [weak self] in self?.onBeginRecording?() ?? true }
             recorder.onEnd = { [weak self] in self?.onEndRecording?() }
             recorder.onApply = { [weak self] shortcut in self?.onShortcutChange?(action, shortcut) }
             recorder.onError = { [weak self] message in self?.showFeedback(message, isError: message != nil) }
             recorders[action] = recorder
-            let row = NSStackView(views: [label, NSView(), recorder]); row.alignment = .centerY
-            settings.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: settings.widthAnchor).isActive = true
+
+            let row = NSView()
+            row.translatesAutoresizingMaskIntoConstraints = false
+            row.heightAnchor.constraint(equalToConstant: 40).isActive = true
+            let content = NSStackView(views: [badge, label, NSView(), recorder])
+            content.orientation = .horizontal; content.alignment = .centerY; content.spacing = 10
+            content.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(content)
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+                content.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+                content.centerYAnchor.constraint(equalTo: row.centerYAnchor)
+            ])
+            list.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
         }
-        let reset = NSButton(title: "恢复默认", target: self, action: #selector(resetPressed))
-        reset.isBordered = false; reset.font = .systemFont(ofSize: 11)
-        reset.contentTintColor = .screenClipSecondaryLabel
-        feedback.font = .systemFont(ofSize: 11); feedback.alignment = .right
+
+        shortcutsPanel.addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: shortcutsPanel.widthAnchor).isActive = true
+
+        let reset = PillActionButton(title: "恢复默认", style: .subtle, target: self, action: #selector(resetPressed))
+        reset.fixedHeight = 24; reset.horizontalPadding = 10
+        feedback.font = .systemFont(ofSize: 11.5); feedback.textColor = .screenClipSecondaryLabel
+        feedback.stringValue = "点击右侧键帽录制，Delete 清除"
+        feedback.lineBreakMode = .byTruncatingTail
         feedback.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let footer = NSStackView(views: [reset, feedback]); footer.spacing = 12
-        footer.heightAnchor.constraint(equalToConstant: 22).isActive = true
-        settings.addArrangedSubview(footer); footer.widthAnchor.constraint(equalTo: settings.widthAnchor).isActive = true
-        settings.isHidden = true; root.addArrangedSubview(settings)
-        for view in [header, buttons, separator, toggleRow, loginItemRow, settings] {
-            view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        }
-        collapsedFrameHeight = frame.height
-        center()
+        let footer = NSStackView(views: [feedback, NSView(), reset])
+        footer.orientation = .horizontal; footer.alignment = .centerY; footer.spacing = 10
+        shortcutsPanel.addArrangedSubview(footer)
+        footer.widthAnchor.constraint(equalTo: shortcutsPanel.widthAnchor).isActive = true
+    }
+
+    private func switchTab(_ index: Int) {
+        if index == 0 { stopRecording() }
+        operationsPanel.isHidden = index != 0
+        shortcutsPanel.isHidden = index != 1
     }
 
     func update(bindings: [ShortcutAction: Shortcut], permissionGranted: Bool) {
         for action in ShortcutAction.allCases {
-            captureButtons[action]?.shortcut = bindings[action]
+            heroTiles[action]?.shortcut = bindings[action]
+            stripButtons[action]?.shortcut = bindings[action]
             recorders[action]?.shortcut = bindings[action]
         }
-        permission.attributedTitle = NSAttributedString(string: permissionGranted ? "● 就绪" : "授权截图", attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: permissionGranted ? NSColor.screenClipSecondaryLabel : NSColor.screenClipAccent
-        ])
-        permission.contentTintColor = permissionGranted ? .screenClipSecondaryLabel : .screenClipAccent
+        permission.isGranted = permissionGranted
         permission.toolTip = permissionGranted ? "截图权限已开启" : "开启屏幕录制权限"
     }
-    func revealSettings() { if !expanded { toggleSettings() } }
+
+    func revealSettings() {
+        tabs.select(1, notify: true)
+    }
+
     func updateLoginItem(_ state: LoginItemState) {
         loginItem.state = state.isRequested ? .on : .off
         loginItem.title = state == .requiresApproval ? "登录时启动 · 待允许" : "登录时启动"
@@ -260,36 +617,39 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         alert.addButton(withTitle: "好")
         alert.beginSheetModal(for: self)
     }
+
     func showFeedback(_ message: String?, isError: Bool = false) {
-        feedback.stringValue = message ?? ""
-        feedback.textColor = isError ? .systemRed : .screenClipSecondaryLabel
+        if let message, !message.isEmpty {
+            feedback.stringValue = message
+            feedback.textColor = isError ? .systemRed : ScreenClipTone.green.foreground
+        } else {
+            feedback.stringValue = "点击右侧键帽录制，Delete 清除"
+            feedback.textColor = .screenClipSecondaryLabel
+        }
     }
+
     func stopRecording() { recorders.values.forEach { $0.cancelRecording() } }
     func windowWillClose(_ notification: Notification) { stopRecording() }
     func windowDidResignKey(_ notification: Notification) { stopRecording() }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if let recorder = firstResponder as? ShortcutRecorder, recorder.isRecording {
             recorder.keyDown(with: event); return true
         }
         return super.performKeyEquivalent(with: event)
     }
+
     @objc private func copyPressed() { onCapture?(.copy) }
     @objc private func scrollPressed() { onCapture?(.scroll) }
     @objc private func translatePressed() { onCapture?(.translate) }
+    @objc private func pinCapturePressed() { onCapture?(.pinCapture) }
+    @objc private func pinClipboardPressed() { onCapture?(.pinClipboard) }
     @objc private func clipboardPressed() { onCapture?(.clipboard) }
     @objc private func translationSettingsPressed() { stopRecording(); onTranslationSettings?() }
+    @objc private func pinFilePressed() { stopRecording(); onPinImageFile?() }
     @objc private func loginItemPressed() { onLoginItemChange?(loginItem.state == .on) }
     @objc private func loginItemSettingsPressed() { onLoginItemSettings?() }
     @objc private func permissionPressed() { onPermission?() }
-    @objc private func toggleSettings() {
-        if expanded { stopRecording() }
-        expanded.toggle(); settings.isHidden = !expanded
-        toggle.image = NSImage(systemSymbolName: expanded ? "chevron.down" : "chevron.right", accessibilityDescription: nil)
-        var newFrame = frame
-        let height = collapsedFrameHeight + (expanded ? 186 : 0)
-        newFrame.origin.y += newFrame.height - height; newFrame.size.height = height
-        setFrame(newFrame, display: true)
-    }
     @objc private func resetPressed() {
         stopRecording()
         if let error = onReset?() { showFeedback(error, isError: true) }

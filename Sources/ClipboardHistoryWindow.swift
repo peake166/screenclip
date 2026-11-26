@@ -17,13 +17,64 @@ private final class ClipboardPreviewImage: NSImageView {
 private final class ClipboardRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         guard isSelected else { return }
-        NSColor.screenClipAccent.withAlphaComponent(0.14).setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 5, dy: 1), xRadius: 9, yRadius: 9).fill()
+        let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 6, dy: 2), xRadius: 9, yRadius: 9)
+        ScreenClipTone.blue.softBackground.setFill()
+        pill.fill()
+        ScreenClipTone.blue.foreground.withAlphaComponent(0.28).setStroke()
+        pill.lineWidth = 0.75
+        pill.stroke()
+    }
+}
+
+@MainActor
+private final class ClipboardItemIconView: NSView {
+    var thumbnail: NSImage? { didSet { needsDisplay = true } }
+    var isImageEntry = false { didSet { needsDisplay = true } }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+        if isImageEntry, let thumbnail {
+            NSGraphicsContext.saveGraphicsState()
+            shape.addClip()
+            NSColor.screenClipCardFill.setFill(); bounds.fill()
+            let imgSize = thumbnail.size
+            if imgSize.width > 0, imgSize.height > 0 {
+                let scale = max(bounds.width / imgSize.width, bounds.height / imgSize.height)
+                let drawSize = CGSize(width: imgSize.width * scale, height: imgSize.height * scale)
+                let drawRect = CGRect(
+                    x: (bounds.width - drawSize.width) / 2,
+                    y: (bounds.height - drawSize.height) / 2,
+                    width: drawSize.width,
+                    height: drawSize.height
+                )
+                thumbnail.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1)
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            NSColor.screenClipCardBorder.setStroke()
+            shape.lineWidth = 0.8; shape.stroke()
+        } else {
+            let tone: ScreenClipTone = isImageEntry ? .amber : .blue
+            tone.softBackground.setFill(); shape.fill()
+            ScreenClipDrawing.drawSymbol(
+                isImageEntry ? "photo" : "doc.text",
+                pointSize: 13.5,
+                weight: .semibold,
+                color: tone.foreground,
+                centeredIn: bounds
+            )
+        }
     }
 }
 
 private final class ClipboardCell: NSTableCellView {
-    let icon = NSImageView()
+    let iconBadge = ClipboardItemIconView()
     let name = ClipboardContentLabel(labelWithString: "")
     let meta = ClipboardContentLabel(labelWithString: "")
     let pinned = NSImageView(image: NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "已置顶")!)
@@ -33,22 +84,37 @@ private final class ClipboardCell: NSTableCellView {
         name.font = .systemFont(ofSize: 13, weight: .medium); name.lineBreakMode = .byTruncatingTail
         meta.font = .systemFont(ofSize: 11); meta.textColor = .screenClipSecondaryLabel; meta.lineBreakMode = .byTruncatingTail
         for label in [name, meta] { label.maximumNumberOfLines = 1; label.usesSingleLineMode = true }
-        icon.imageScaling = .scaleProportionallyUpOrDown
-        icon.contentTintColor = .screenClipSecondaryLabel
-        pinned.contentTintColor = .screenClipSecondaryLabel
-        let labels = NSStackView(views: [name, meta]); labels.orientation = .vertical; labels.alignment = .leading; labels.spacing = 4
-        for view in [icon, labels, pinned] { view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view) }
+        pinned.contentTintColor = ScreenClipTone.amber.foreground
+        let labels = NSStackView(views: [name, meta]); labels.orientation = .vertical; labels.alignment = .leading; labels.spacing = 3
+        for view in [iconBadge, labels, pinned] { view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view) }
         NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15), icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 30), icon.heightAnchor.constraint(equalToConstant: 34),
-            labels.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 11), labels.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13), iconBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconBadge.widthAnchor.constraint(equalToConstant: 32), iconBadge.heightAnchor.constraint(equalToConstant: 32),
+            labels.leadingAnchor.constraint(equalTo: iconBadge.trailingAnchor, constant: 10), labels.centerYAnchor.constraint(equalTo: centerYAnchor),
             labels.trailingAnchor.constraint(equalTo: pinned.leadingAnchor, constant: -8),
             name.widthAnchor.constraint(equalTo: labels.widthAnchor), meta.widthAnchor.constraint(equalTo: labels.widthAnchor),
-            pinned.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12), pinned.centerYAnchor.constraint(equalTo: centerYAnchor),
+            pinned.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -13), pinned.centerYAnchor.constraint(equalTo: centerYAnchor),
             pinned.widthAnchor.constraint(equalToConstant: 11), pinned.heightAnchor.constraint(equalToConstant: 13)
         ])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+@MainActor
+private final class ClipboardBrandBadge: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 22).isActive = true
+        heightAnchor.constraint(equalToConstant: 22).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        ScreenClipTone.blue.softBackground.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+        ScreenClipDrawing.drawSymbol("doc.on.clipboard", pointSize: 11.5, weight: .semibold, color: ScreenClipTone.blue.foreground, centeredIn: bounds)
+    }
 }
 
 private final class ClipboardListTable: NSTableView {
@@ -76,21 +142,23 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
     private let previewIdleDelay: TimeInterval
     private let search = NSSearchField()
     private let table = ClipboardListTable()
-    private let record = NSButton()
+    private let record = PillActionButton(title: "已暂停", symbolName: "play.fill", style: .tinted(.amber))
     private let status = NSTextField(labelWithString: "")
     private let empty = NSTextField(wrappingLabelWithString: "")
     private let preview = NSTextView()
     private let previewTitle = ClipboardContentLabel(labelWithString: "")
     private let previewSource = ClipboardContentLabel(labelWithString: "")
     private let expiry = NSTextField(labelWithString: "")
-    private let format = NSTextField(labelWithString: "")
     private let textScroll = NSScrollView()
     private let image = ClipboardPreviewImage()
-    private let primary = NSButton(title: "粘贴", target: nil, action: nil)
-    private let actions = NSButton(title: "操作  ⌘K", target: nil, action: nil)
-    private let hint = NSTextField(labelWithString: "⌘↵ 仅复制")
-    private let filters = NSSegmentedControl(labels: ["全部", "文字", "图片", "置顶"], trackingMode: .selectOne, target: nil, action: nil)
-    private let pinPreview = NSButton()
+    private let primary = PillActionButton(title: "粘贴", style: .primary(.blue))
+    private let actions = PillActionButton(title: "操作  ⌘K", style: .subtle)
+    private let hint = KeycapHintView(key: "⌘↵", label: "仅复制")
+    private let filters = PillSegmentedControl(titles: ["全部", "文字", "图片", "置顶"])
+    private let countBadge = TagPillView(text: "", tone: .slate)
+    private let formatTag = TagPillView(text: "", tone: .slate)
+    private let pinToScreen = PillActionButton(title: "贴到屏幕", symbolName: "pin", style: .tinted(.amber))
+    private let pinPreview = PillActionButton(symbolName: "pin", style: .iconCircle)
     private var rows: [Row] = []
     private var settingsWindow: ClipboardHistorySettingsWindow?
     private var searchWork: Task<[ClipboardHistoryEntry], Never>?
@@ -108,6 +176,7 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
     private var selectingLatestOnOpen = false, applyingRows = false
     private var pendingAction: (ClipboardPrimaryAction, Bool)?
     var onAction: ((ClipboardPrimaryAction) -> Void)?
+    var onPinImageData: ((Data) -> Void)?
     var onDismiss: (() -> Void)?
 
     init(history: ClipboardHistory, previewIdleDelay: TimeInterval = 60, previewLoader: PreviewLoader? = nil) {
@@ -132,22 +201,38 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
             root.heightAnchor.constraint(greaterThanOrEqualToConstant: minSize.height),
             root.heightAnchor.constraint(lessThanOrEqualToConstant: maxSize.height)
         ])
-        let brand = NSTextField(labelWithString: "截图助手  /  剪贴板")
-        brand.font = .systemFont(ofSize: 12, weight: .medium); brand.textColor = .screenClipSecondaryLabel
-        record.target = self; record.action = #selector(toggleRecording); record.isBordered = false; record.font = .systemFont(ofSize: 11)
-        record.setAccessibilityLabel("暂停或开启剪贴板记录"); record.contentTintColor = .screenClipSecondaryLabel
-        let settings = NSButton(image: NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "剪贴板设置")!, target: self, action: #selector(openSettings))
-        settings.isBordered = false; settings.contentTintColor = .screenClipSecondaryLabel; settings.setAccessibilityLabel("剪贴板设置")
-        let titlebar = NSStackView(views: [brand, NSView(), record, settings]); titlebar.spacing = 10; titlebar.alignment = .centerY
-        search.placeholderString = "搜索复制过的内容…"; search.delegate = self
+        let brandBadge = ClipboardBrandBadge()
+        let brand = NSTextField(labelWithString: "剪贴板历史")
+        brand.font = .systemFont(ofSize: 13.5, weight: .semibold); brand.textColor = .labelColor
+        record.target = self; record.action = #selector(toggleRecording)
+        record.fixedHeight = 24; record.horizontalPadding = 9; record.font = .systemFont(ofSize: 11, weight: .medium)
+        record.setAccessibilityLabel("暂停或开启剪贴板记录")
+        let settings = PillActionButton(symbolName: "slider.horizontal.3", style: .iconCircle, target: self, action: #selector(openSettings))
+        settings.fixedHeight = 24; settings.setAccessibilityLabel("剪贴板设置"); settings.toolTip = "剪贴板设置"
+        let titlebar = NSStackView(views: [brandBadge, brand, countBadge, NSView(), record, settings])
+        titlebar.spacing = 8; titlebar.alignment = .centerY
+
+        // Borderless search field nestled inside a soft glass InsetCardView.
+        let searchCard = InsetCardView(radius: 11)
+        searchCard.translatesAutoresizingMaskIntoConstraints = false
+        search.placeholderString = "搜索复制过的文字、链接或来源应用…"; search.delegate = self
         search.setAccessibilityLabel("搜索剪贴板历史"); search.sendsSearchStringImmediately = true
-        search.font = .systemFont(ofSize: 17); search.controlSize = .large
-        filters.selectedSegment = 0; filters.selectedSegmentBezelColor = .screenClipAccent; filters.segmentStyle = .rounded; filters.controlSize = .small
+        search.font = .systemFont(ofSize: 14); search.isBordered = false; search.drawsBackground = false
+        search.focusRingType = .none; search.translatesAutoresizingMaskIntoConstraints = false
+        searchCard.addSubview(search)
+        NSLayoutConstraint.activate([
+            search.leadingAnchor.constraint(equalTo: searchCard.leadingAnchor, constant: 10),
+            search.trailingAnchor.constraint(equalTo: searchCard.trailingAnchor, constant: -10),
+            search.centerYAnchor.constraint(equalTo: searchCard.centerYAnchor)
+        ])
+
+        filters.selectedSegment = 0
         filters.target = self; filters.action = #selector(changeFilter); filters.setAccessibilityLabel("剪贴板内容类型")
 
         let list = NSScrollView(); list.hasVerticalScroller = true; list.autohidesScrollers = true
         list.drawsBackground = true; list.backgroundColor = .textBackgroundColor
         list.wantsLayer = true; list.layer?.cornerRadius = 12; list.layer?.masksToBounds = true
+        list.layer?.borderWidth = 0.7; list.layer?.borderColor = NSColor.screenClipCardBorder.cgColor
         table.addTableColumn(NSTableColumn(identifier: .init("entry")))
         table.headerView = nil; table.intercellSpacing = NSSize(width: 0, height: 2)
         table.style = .plain; table.backgroundColor = .textBackgroundColor; table.selectionHighlightStyle = .regular
@@ -158,39 +243,50 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         table.setAccessibilityLabel("剪贴板历史列表"); list.documentView = table
         list.contentView.drawsBackground = true; list.contentView.backgroundColor = .textBackgroundColor
         let detail = ReadableSurface(); detail.usesOpaqueBackground = true
-        previewTitle.font = .systemFont(ofSize: 16, weight: .medium); previewTitle.lineBreakMode = .byTruncatingTail
-        previewSource.font = .systemFont(ofSize: 11); previewSource.textColor = .screenClipSecondaryLabel; previewSource.lineBreakMode = .byTruncatingTail
+        previewTitle.font = .systemFont(ofSize: 15, weight: .semibold); previewTitle.lineBreakMode = .byTruncatingTail
+        previewSource.font = .systemFont(ofSize: 11.5, weight: .medium); previewSource.textColor = .screenClipSecondaryLabel; previewSource.lineBreakMode = .byTruncatingTail
         for label in [previewTitle, previewSource] { label.maximumNumberOfLines = 1; label.usesSingleLineMode = true }
-        pinPreview.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "置顶")
-        pinPreview.isBordered = false; pinPreview.target = self; pinPreview.action = #selector(pinSelected)
+        pinToScreen.fixedHeight = 22; pinToScreen.horizontalPadding = 8; pinToScreen.font = .systemFont(ofSize: 11, weight: .medium)
+        pinToScreen.target = self; pinToScreen.action = #selector(pinSelectedToScreen)
+        pinToScreen.setAccessibilityLabel("贴到屏幕")
+        pinToScreen.toolTip = "将图片固定在屏幕上  ⌥⌘P"
+        pinToScreen.isHidden = true
+        pinPreview.fixedHeight = 24; pinPreview.showsToggleState = true
+        pinPreview.target = self; pinPreview.action = #selector(pinSelected)
         pinPreview.setAccessibilityLabel("置顶或取消置顶")
         pinPreview.toolTip = "置顶或取消置顶  ⇧⌘P"
-        let detailHeader = NSStackView(views: [previewSource, pinPreview]); detailHeader.alignment = .centerY
+        let detailHeader = NSStackView(views: [previewSource, pinToScreen, pinPreview]); detailHeader.alignment = .centerY; detailHeader.spacing = 6
+        let detailTopDivider = HairlineDivider(vertical: false)
+        let detailBottomDivider = HairlineDivider(vertical: false)
         preview.isEditable = false; preview.isSelectable = true; preview.drawsBackground = false
         preview.font = .systemFont(ofSize: 13); preview.textColor = .labelColor
-        preview.textContainerInset = NSSize(width: 0, height: 8)
+        preview.textContainerInset = NSSize(width: 0, height: 6)
         preview.isVerticallyResizable = true; preview.isHorizontallyResizable = false
         preview.autoresizingMask = .width; preview.textContainer?.widthTracksTextView = true
         preview.setAccessibilityLabel("剪贴板内容预览")
         textScroll.hasVerticalScroller = true; textScroll.drawsBackground = false; textScroll.documentView = preview
         image.imageScaling = .scaleProportionallyUpOrDown; image.setAccessibilityLabel("剪贴板图片预览")
+        image.wantsLayer = true; image.layer?.cornerRadius = 8; image.layer?.masksToBounds = true
         image.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         image.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         let previewBody = NSView()
         for view in [textScroll, image] { pin(view, in: previewBody) }
-        for label in [format, expiry] { label.font = .systemFont(ofSize: 11); label.textColor = .screenClipSecondaryLabel }
+        expiry.font = .systemFont(ofSize: 11); expiry.textColor = .screenClipSecondaryLabel
         expiry.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let detailFooter = NSStackView(views: [format, NSView(), expiry]); detailFooter.alignment = .centerY
-        for view in [detailHeader, previewTitle, previewBody, detailFooter] {
+        let detailFooter = NSStackView(views: [formatTag, NSView(), expiry]); detailFooter.alignment = .centerY
+        for view in [detailHeader, detailTopDivider, previewTitle, previewBody, detailBottomDivider, detailFooter] {
             view.translatesAutoresizingMaskIntoConstraints = false; detail.addSubview(view)
-            view.leadingAnchor.constraint(equalTo: detail.leadingAnchor, constant: 18).isActive = true
-            view.trailingAnchor.constraint(equalTo: detail.trailingAnchor, constant: -18).isActive = true
+            let pad: CGFloat = (view === detailTopDivider || view === detailBottomDivider) ? 0 : 16
+            view.leadingAnchor.constraint(equalTo: detail.leadingAnchor, constant: pad).isActive = true
+            view.trailingAnchor.constraint(equalTo: detail.trailingAnchor, constant: -pad).isActive = true
         }
         NSLayoutConstraint.activate([
-            detailHeader.topAnchor.constraint(equalTo: detail.topAnchor, constant: 14), detailHeader.heightAnchor.constraint(equalToConstant: 22),
-            previewTitle.topAnchor.constraint(equalTo: detailHeader.bottomAnchor, constant: 12), previewTitle.heightAnchor.constraint(equalToConstant: 24),
-            previewBody.topAnchor.constraint(equalTo: previewTitle.bottomAnchor, constant: 8), previewBody.bottomAnchor.constraint(equalTo: detailFooter.topAnchor, constant: -12),
-            detailFooter.bottomAnchor.constraint(equalTo: detail.bottomAnchor, constant: -16), detailFooter.heightAnchor.constraint(equalToConstant: 18)
+            detailHeader.topAnchor.constraint(equalTo: detail.topAnchor, constant: 10), detailHeader.heightAnchor.constraint(equalToConstant: 24),
+            detailTopDivider.topAnchor.constraint(equalTo: detailHeader.bottomAnchor, constant: 8),
+            previewTitle.topAnchor.constraint(equalTo: detailTopDivider.bottomAnchor, constant: 10), previewTitle.heightAnchor.constraint(equalToConstant: 22),
+            previewBody.topAnchor.constraint(equalTo: previewTitle.bottomAnchor, constant: 6), previewBody.bottomAnchor.constraint(equalTo: detailBottomDivider.topAnchor, constant: -8),
+            detailBottomDivider.bottomAnchor.constraint(equalTo: detailFooter.topAnchor, constant: -8),
+            detailFooter.bottomAnchor.constraint(equalTo: detail.bottomAnchor, constant: -10), detailFooter.heightAnchor.constraint(equalToConstant: 22)
         ])
         let split = NSStackView(views: [list, detail]); split.spacing = 10; split.distribution = .fill
         list.heightAnchor.constraint(equalTo: split.heightAnchor).isActive = true
@@ -201,25 +297,24 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         empty.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(empty); empty.setAccessibilityLabel("剪贴板空状态")
         status.font = .systemFont(ofSize: 11); status.lineBreakMode = .byTruncatingTail
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        actions.target = self; actions.action = #selector(openActions); actions.isBordered = false; actions.font = .systemFont(ofSize: 11)
-        actions.setContentHuggingPriority(.required, for: .horizontal); actions.contentTintColor = .screenClipSecondaryLabel
-        hint.font = .systemFont(ofSize: 11); hint.textColor = .screenClipSecondaryLabel
-        primary.target = self; primary.action = #selector(defaultAction); primary.bezelStyle = .rounded
-        primary.keyEquivalent = "\r"; primary.keyEquivalentModifierMask = []; primary.bezelColor = .screenClipAccent
+        actions.target = self; actions.action = #selector(openActions)
+        actions.fixedHeight = 26; actions.horizontalPadding = 9; actions.font = .systemFont(ofSize: 11.5, weight: .medium)
+        primary.target = self; primary.action = #selector(defaultAction)
+        primary.fixedHeight = 28; primary.horizontalPadding = 12
+        primary.keyEquivalent = "\r"; primary.keyEquivalentModifierMask = []
         primary.setAccessibilityLabel("使用选中的剪贴板内容")
-        primary.setContentHuggingPriority(.required, for: .horizontal)
         let footer = NSStackView(views: [actions, status, NSView(), hint, primary]); footer.spacing = 10; footer.alignment = .centerY
-        for view in [titlebar, search, filters, split, footer] {
+        for view in [titlebar, searchCard, filters, split, footer] {
             view.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(view)
             view.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16).isActive = true
             if view != filters { view.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16).isActive = true }
         }
         NSLayoutConstraint.activate([
-            titlebar.topAnchor.constraint(equalTo: root.topAnchor, constant: 13), titlebar.heightAnchor.constraint(equalToConstant: 24),
-            search.topAnchor.constraint(equalTo: titlebar.bottomAnchor, constant: 10), search.heightAnchor.constraint(equalToConstant: 34),
-            filters.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 10), filters.heightAnchor.constraint(equalToConstant: 24),
-            split.topAnchor.constraint(equalTo: filters.bottomAnchor, constant: 12), split.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
-            footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12), footer.heightAnchor.constraint(equalToConstant: 30),
+            titlebar.topAnchor.constraint(equalTo: root.topAnchor, constant: 12), titlebar.heightAnchor.constraint(equalToConstant: 26),
+            searchCard.topAnchor.constraint(equalTo: titlebar.bottomAnchor, constant: 9), searchCard.heightAnchor.constraint(equalToConstant: 34),
+            filters.topAnchor.constraint(equalTo: searchCard.bottomAnchor, constant: 9), filters.heightAnchor.constraint(equalToConstant: 28),
+            split.topAnchor.constraint(equalTo: filters.bottomAnchor, constant: 10), split.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -10),
+            footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -11), footer.heightAnchor.constraint(equalToConstant: 28),
             empty.centerXAnchor.constraint(equalTo: list.centerXAnchor), empty.centerYAnchor.constraint(equalTo: list.centerYAnchor),
             empty.widthAnchor.constraint(equalTo: list.widthAnchor, constant: -30)
         ])
@@ -276,7 +371,11 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         let entries = history.entries, revealLatest = selectingLatestOnOpen
         let selected = revealLatest ? entries.max(by: { $0.copiedAt < $1.copiedAt })?.id : selectedEntry?.id
         if revealLatest && history.pendingOperations == 0 { selectingLatestOnOpen = false }
-        record.title = history.settings.isRecording ? "正在记录  Ⅱ" : "已暂停  ▶"
+        countBadge.text = entries.isEmpty ? "" : "\(entries.count) 条"
+        countBadge.isHidden = entries.isEmpty
+        record.title = history.settings.isRecording ? "正在记录" : "已暂停"
+        record.symbolName = history.settings.isRecording ? "pause.fill" : "play.fill"
+        record.pillStyle = history.settings.isRecording ? .tinted(.green) : .tinted(.amber)
         record.toolTip = history.settings.isRecording ? "暂停记录" : "开启记录"
         status.stringValue = history.errorMessage ?? ""; status.toolTip = history.errorMessage
         status.textColor = history.errorMessage == nil ? .screenClipSecondaryLabel : .systemRed
@@ -339,9 +438,11 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
         case .group(let title):
-            let label = NSTextField(labelWithString: title); label.font = .systemFont(ofSize: 11, weight: .medium); label.textColor = .screenClipSecondaryLabel
+            let label = NSTextField(labelWithString: title)
+            label.font = .systemFont(ofSize: 11, weight: .semibold)
+            label.textColor = title == "置顶" ? ScreenClipTone.amber.foreground : .screenClipSecondaryLabel
             let view = NSView(); label.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(label)
-            NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 15), label.centerYAnchor.constraint(equalTo: view.centerYAnchor)])
+            NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14), label.centerYAnchor.constraint(equalTo: view.centerYAnchor)])
             return view
         case .entry(let entry):
             let id = NSUserInterfaceItemIdentifier("clipboard-entry")
@@ -351,13 +452,14 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
             let now = Date()
             let age = abs(now.timeIntervalSince(entry.copiedAt)) < 60 ? "刚刚" : relative.localizedString(for: entry.copiedAt, relativeTo: now)
             cell.meta.stringValue = entry.applicationName + " · " + age
-            cell.icon.image = NSImage(systemSymbolName: entry.hasImage ? "photo" : "doc.text", accessibilityDescription: nil)
+            cell.iconBadge.isImageEntry = entry.hasImage
+            cell.iconBadge.thumbnail = nil
             if entry.hasImage {
-                if let image = thumbnailCache.object(forKey: entry.id as NSUUID) { cell.icon.image = image }
+                if let image = thumbnailCache.object(forKey: entry.id as NSUUID) { cell.iconBadge.thumbnail = image }
                 else { loadPreview(entry.id, 80) { [weak self, weak cell] preview in
                     guard let cg = preview?.image else { return }; let image = NSImage(cgImage: cg, size: .zero)
                     self?.thumbnailCache.setObject(image, forKey: entry.id as NSUUID, cost: cg.bytesPerRow * cg.height)
-                    if cell?.entryID == entry.id { cell?.icon.image = image }
+                    if cell?.entryID == entry.id { cell?.iconBadge.thumbnail = image }
                 } }
             }
             return cell
@@ -390,6 +492,9 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         if event.keyCode == 35 && flags.intersection([.command, .shift, .control, .option]) == [.command, .shift] {
             pinSelected(); return true
         }
+        if event.keyCode == 35 && flags.intersection([.command, .shift, .control, .option]) == [.command, .option] {
+            if selectedEntry?.hasImage == true { pinSelectedToScreen(); return true }
+        }
         if flags.contains(.command) {
             switch event.keyCode {
             case 36, 76: flags.contains(.shift) ? pastePlain() : copyOnly(); return true
@@ -421,14 +526,25 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
     private func updatePreview() {
         let entry = selectedEntry
         primary.isEnabled = entry != nil && !busy; pinPreview.isEnabled = entry != nil
+        pinToScreen.isHidden = entry?.hasImage != true
+        pinToScreen.isEnabled = entry?.hasImage == true && !busy
         primary.title = busy ? "准备中…" : history.settings.primaryAction == .copy ? "复制  ↵" : "粘贴到\(targetName ?? "原应用")  ↵"
-        pinPreview.image = NSImage(systemSymbolName: entry?.pinned == true ? "pin.fill" : "pin", accessibilityDescription: entry?.pinned == true ? "取消置顶" : "置顶")
+        pinPreview.symbolName = entry?.pinned == true ? "pin.fill" : "pin"
+        pinPreview.pillStyle = entry?.pinned == true ? .tinted(.amber) : .iconCircle
+        pinPreview.isToggledOn = false
         if let entry {
             previewTitle.stringValue = String(entry.title.prefix(80)); previewSource.stringValue = entry.applicationName
-            format.stringValue = entry.hasImage ? "图片" : ByteCountFormatter.string(fromByteCount: Int64(entry.byteCount), countStyle: .file)
+            formatTag.isHidden = false
+            formatTag.text = entry.hasImage ? "图片" : ByteCountFormatter.string(fromByteCount: Int64(entry.byteCount), countStyle: .file)
+            formatTag.symbolName = entry.hasImage ? "photo" : "doc.text"
+            formatTag.tone = entry.hasImage ? .amber : .slate
             let days = max(0, Int(ceil(entry.copiedAt.addingTimeInterval(Double(history.settings.retentionDays) * 86400).timeIntervalSinceNow / 86400)))
             expiry.stringValue = entry.pinned ? "置顶 · 长期保留" : "约 \(days) 天后清理"
-        } else { previewTitle.stringValue = ""; previewSource.stringValue = ""; format.stringValue = ""; expiry.stringValue = "" }
+            expiry.textColor = entry.pinned ? ScreenClipTone.amber.foreground : .screenClipSecondaryLabel
+        } else {
+            previewTitle.stringValue = ""; previewSource.stringValue = ""; expiry.stringValue = ""
+            formatTag.text = ""; formatTag.isHidden = true
+        }
         guard previewID != entry?.id else { return }
         previewID = entry?.id; previewToken = UUID(); let token = previewToken
         image.image = nil; image.isHidden = true; textScroll.isHidden = false; preview.string = entry?.text ?? ""
@@ -482,6 +598,21 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         }
     }
     @objc private func pinSelected() { if let entry = selectedEntry { history.setPinned(entry.id, !entry.pinned) } }
+    @objc func pinSelectedToScreen() {
+        guard !busy, let entry = selectedEntry, entry.hasImage else { return }
+        busy = true; updatePreview(); let token = sessionToken
+        history.loadImageData(entry.id) { [weak self] data in
+            guard let self, self.sessionToken == token else { return }
+            self.busy = false
+            if let data {
+                self.hidingForAction = true; self.orderOut(nil); self.hidingForAction = false
+                self.onPinImageData?(data)
+            } else {
+                self.status.stringValue = "无法读取原图，请重试。"; self.status.textColor = .systemRed
+                self.updatePreview()
+            }
+        }
+    }
     @objc private func deleteSelected() {
         guard let entry = selectedEntry else { return }
         if !entry.pinned { previewCache.removeObject(forKey: entry.id as NSUUID); imagePreviewIDs.remove(entry.id); history.remove(entry.id); return }
@@ -512,6 +643,7 @@ final class ClipboardHistoryWindow: NSPanel, NSTableViewDataSource, NSTableViewD
         add("粘贴到原应用", #selector(defaultPaste), enabled: selectedEntry != nil)
         add("仅复制", #selector(copyOnly), key: "\r", enabled: selectedEntry != nil)
         add("粘贴为纯文本", #selector(pastePlain), key: "\r", flags: [.command, .shift], enabled: selectedEntry?.text.isEmpty == false)
+        add("贴到屏幕", #selector(pinSelectedToScreen), key: "p", flags: [.command, .option], enabled: selectedEntry?.hasImage == true)
         menu.addItem(.separator())
         add(selectedEntry?.pinned == true ? "取消置顶" : "置顶 · 长期保留", #selector(pinSelected), key: "p", flags: [.command, .shift], enabled: selectedEntry != nil)
         add("删除这条", #selector(deleteSelected), key: "\u{8}", enabled: selectedEntry != nil)

@@ -107,3 +107,6 @@ xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framewor
 xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framework AppKit -framework ScreenCaptureKit -framework Carbon -framework SwiftUI -framework Translation -framework Vision -framework NaturalLanguage -framework Security -framework ServiceManagement \
   "${preview_sources[@]}" Tests/TranslationTextCopyTests.swift -o .build/translation-text-copy-tests
 .build/translation-text-copy-tests
+xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.0" -framework AppKit -framework ScreenCaptureKit -framework Carbon -framework SwiftUI -framework Translation -framework Vision -framework NaturalLanguage -framework Security -framework ServiceManagement \
+  "${preview_sources[@]}" Tests/PinnedImageTests.swift -o .build/pinned-image-tests
+.build/pinned-image-tests

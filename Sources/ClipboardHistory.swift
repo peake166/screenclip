@@ -164,6 +164,13 @@ final class ClipboardHistory {
             DispatchQueue.main.async { completion(result) }
         }
     }
+    func loadImageData(_ id: UUID, completion: @escaping (Data?) -> Void) {
+        guard let store else { completion(nil); return }
+        worker.async {
+            let data = autoreleasepool { (try? store.read(id))?.imageData }
+            DispatchQueue.main.async { completion(data) }
+        }
+    }
     func setPinned(_ id: UUID, _ value: Bool) { enqueue { try $0.setPinned(id, value) } }
     func remove(_ id: UUID) { enqueue { try $0.remove(id) } }
     func clear(includingPinned: Bool = false) {

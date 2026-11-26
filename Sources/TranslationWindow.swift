@@ -10,13 +10,13 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
     private let recognize: (Raster) async throws -> String
     private let translator: ((String, TranslationSettings) async throws -> String)?
     private let board: NSPasteboard
-    private let service = NSTextField(labelWithString: "")
+    private let service = TagPillView(text: "", symbolName: "character.bubble", tone: .indigo)
     private let status = NSTextField(wrappingLabelWithString: "")
     private let spinner = NSProgressIndicator()
-    private let tabs = NSSegmentedControl(labels: ["译文", "原文"], trackingMode: .selectOne, target: nil, action: nil)
-    private let copy = NSButton(title: "复制译文", target: nil, action: nil)
-    private let copyOriginal = NSButton(title: "复制原文", target: nil, action: nil)
-    private let retry = NSButton(title: "重试", target: nil, action: nil)
+    private let tabs = PillSegmentedControl(titles: ["译文", "原文"])
+    private let copy = PillActionButton(title: "复制译文", symbolName: "doc.on.doc", style: .primary(.blue))
+    private let copyOriginal = PillActionButton(title: "复制原文", style: .subtle)
+    private let retry = PillActionButton(title: "重试", symbolName: "arrow.clockwise", style: .tinted(.amber))
     private let text = NSTextView()
     private var settingsUpdated = false
     private lazy var workflow = TranslationWorkflow(recognize: recognize, translate: { [weak self] text, settings in
@@ -35,35 +35,34 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
         self.recognize = recognize; translator = translate; board = pasteboard
         super.init(contentRect: CGRect(x: 0, y: 0, width: 560, height: 470),
                    styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-        title = "截图翻译"; isReleasedWhenClosed = false; delegate = self
+        title = "截图翻译"; titlebarAppearsTransparent = true; isReleasedWhenClosed = false; delegate = self
         minSize = CGSize(width: 480, height: 340)
         level = .floating; hidesOnDeactivate = false; isMovableByWindowBackground = true
         collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-        let effect = FrostedSurface()
+        let effect = FrostedSurface(radius: 16)
         contentView = effect
         let root = NSStackView(); root.orientation = .vertical; root.alignment = .leading; root.spacing = 12
         root.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(root)
         NSLayoutConstraint.activate([
             root.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 20),
             root.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -20),
-            root.topAnchor.constraint(equalTo: effect.topAnchor, constant: 18),
-            root.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -18)
+            root.topAnchor.constraint(equalTo: effect.topAnchor, constant: 14),
+            root.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -16)
         ])
-        service.font = .systemFont(ofSize: 12, weight: .medium); service.textColor = .screenClipSecondaryLabel
-        let settings = NSButton(title: "翻译设置…", target: self, action: #selector(openSettings))
-        settings.isBordered = false; settings.font = .systemFont(ofSize: 12); settings.contentTintColor = .screenClipSecondaryLabel
+        let settings = PillActionButton(title: "翻译设置…", symbolName: "gearshape", style: .subtle, target: self, action: #selector(openSettings))
+        settings.fixedHeight = 26; settings.horizontalPadding = 10
         let top = NSStackView(views: [service, NSView(), settings]); top.alignment = .centerY
         root.addArrangedSubview(top)
         tabs.selectedSegment = 0; tabs.target = self; tabs.action = #selector(switchTab)
         tabs.setAccessibilityLabel("译文或原文")
-        copy.target = self; copy.action = #selector(copyText); copy.bezelStyle = .rounded
-        copy.contentTintColor = .screenClipAccent
-        copyOriginal.target = self; copyOriginal.action = #selector(copyOriginalText); copyOriginal.bezelStyle = .rounded
-        let actions = NSStackView(views: [tabs, NSView(), copyOriginal, copy]); actions.alignment = .centerY
+        copy.target = self; copy.action = #selector(copyText); copy.fixedHeight = 28; copy.horizontalPadding = 12
+        copyOriginal.target = self; copyOriginal.action = #selector(copyOriginalText); copyOriginal.fixedHeight = 28; copyOriginal.horizontalPadding = 11
+        let actions = NSStackView(views: [tabs, NSView(), copyOriginal, copy]); actions.alignment = .centerY; actions.spacing = 8
         root.addArrangedSubview(actions)
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true; scroll.borderType = .noBorder; scroll.drawsBackground = true; scroll.backgroundColor = .textBackgroundColor
         scroll.wantsLayer = true; scroll.layer?.cornerRadius = 12; scroll.layer?.masksToBounds = true
+        scroll.layer?.borderWidth = 0.7; scroll.layer?.borderColor = NSColor.screenClipCardBorder.cgColor
         text.isEditable = false; text.isSelectable = true; text.isRichText = false
         text.drawsBackground = false; text.font = .systemFont(ofSize: 15); text.textColor = .labelColor
         text.textContainerInset = CGSize(width: 14, height: 12)
@@ -78,7 +77,7 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
         spinner.heightAnchor.constraint(equalToConstant: 16).isActive = true
         status.font = .systemFont(ofSize: 12); status.textColor = .screenClipSecondaryLabel
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        retry.target = self; retry.action = #selector(retryTranslation); retry.bezelStyle = .rounded
+        retry.target = self; retry.action = #selector(retryTranslation); retry.fixedHeight = 28; retry.horizontalPadding = 11
         let footer = NSStackView(views: [spinner, status, NSView(), retry]); footer.alignment = .centerY; footer.spacing = 8
         root.addArrangedSubview(footer)
         for view in [top, actions, scroll, footer] { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
@@ -103,7 +102,7 @@ final class TranslationWindow: NSPanel, NSWindowDelegate {
     }
     private func refresh() {
         let original = tabs.selectedSegment == 1
-        service.stringValue = workflow.settings.provider.title + " → " + workflow.settings.target.title
+        service.text = workflow.settings.provider.title + " → " + workflow.settings.target.title
         let value = original ? workflow.original : workflow.translated
         if text.string != value {
             let selection = text.selectedRange()

@@ -11,8 +11,8 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
     private let removeKey = NSButton(title: "删除密钥", target: nil, action: nil)
     private let note = NSTextField(wrappingLabelWithString: "")
     private let feedback = NSTextField(wrappingLabelWithString: "")
-    private let test = NSButton(title: "测试翻译", target: nil, action: nil)
-    private let cloudFields = NSStackView()
+    private let test = PillActionButton(title: "测试翻译", style: .subtle)
+    private let cloudCard = InsetCardView(radius: 12)
     private let root = NSStackView()
     private let system = SystemTranslation()
     private let cloud = CloudTranslation()
@@ -27,17 +27,17 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
     init(store: TranslationSettingsStore, benchmarkTranslator: TranslationBenchmark.Translator? = nil) {
         self.store = store; self.benchmarkTranslator = benchmarkTranslator
         draft = store.settings; currentProvider = store.settings.provider
-        super.init(contentRect: CGRect(x: 0, y: 0, width: 460, height: 360),
+        super.init(contentRect: CGRect(x: 0, y: 0, width: 472, height: 380),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        title = "翻译设置"; isReleasedWhenClosed = false; delegate = self; level = .floating
-        let effect = FrostedSurface()
+        title = "翻译设置"; titlebarAppearsTransparent = true; isReleasedWhenClosed = false; delegate = self; level = .floating
+        let effect = FrostedSurface(radius: 16)
         contentView = effect
-        root.orientation = .vertical; root.alignment = .leading; root.spacing = 14
+        root.orientation = .vertical; root.alignment = .leading; root.spacing = 12
         root.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(root)
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 22),
-            root.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -22),
-            root.topAnchor.constraint(equalTo: effect.topAnchor, constant: 22)
+            root.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 20),
+            root.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -20),
+            root.topAnchor.constraint(equalTo: effect.topAnchor, constant: 18)
         ])
         provider.addItems(withTitles: TranslationProvider.allCases.map(\.title))
         provider.selectItem(at: TranslationProvider.allCases.firstIndex(of: draft.provider)!)
@@ -46,34 +46,35 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
         target.addItems(withTitles: TranslationTarget.allCases.map(\.title))
         target.selectItem(at: TranslationTarget.allCases.firstIndex(of: draft.target)!)
         target.setAccessibilityLabel("目标语言")
-        root.addArrangedSubview(row("翻译服务", provider))
-        root.addArrangedSubview(row("目标语言", target))
-        cloudFields.orientation = .vertical; cloudFields.alignment = .leading; cloudFields.spacing = 12
+
+        let generalCard = groupedCard(rows: [row("翻译服务", provider), row("目标语言", target)])
+        root.addArrangedSubview(generalCard)
+
         model.font = .systemFont(ofSize: 13); model.completes = true
         model.delegate = self
         model.setAccessibilityLabel("翻译模型")
         key.font = .systemFont(ofSize: 13); key.setAccessibilityLabel("API 密钥")
-        cloudFields.addArrangedSubview(row("模型", model))
-        cloudFields.addArrangedSubview(row("API 密钥", key))
         let keyNote = NSTextField(labelWithString: "密钥仅保存在 macOS 钥匙串")
         keyNote.font = .systemFont(ofSize: 11); keyNote.textColor = .screenClipSecondaryLabel
         removeKey.target = self; removeKey.action = #selector(deleteKey)
-        removeKey.isBordered = false; removeKey.font = .systemFont(ofSize: 11); removeKey.contentTintColor = .screenClipSecondaryLabel
+        removeKey.isBordered = false; removeKey.font = .systemFont(ofSize: 11, weight: .medium); removeKey.contentTintColor = ScreenClipTone.red.foreground
         let keyFooter = NSStackView(views: [keyNote, NSView(), removeKey]); keyFooter.alignment = .centerY
-        cloudFields.addArrangedSubview(keyFooter)
-        for view in cloudFields.arrangedSubviews { view.widthAnchor.constraint(equalTo: cloudFields.widthAnchor).isActive = true }
-        root.addArrangedSubview(cloudFields)
-        note.font = .systemFont(ofSize: 11); note.textColor = .screenClipSecondaryLabel
+        populateCard(cloudCard, rows: [row("模型", model), row("API 密钥", key), keyFooter])
+        root.addArrangedSubview(cloudCard)
+
+        note.font = .systemFont(ofSize: 11.5); note.textColor = .screenClipSecondaryLabel
         root.addArrangedSubview(note)
-        feedback.font = .systemFont(ofSize: 12); feedback.isHidden = true
+        feedback.font = .systemFont(ofSize: 12, weight: .medium); feedback.isHidden = true
         feedback.setAccessibilityLabel("设置状态")
         root.addArrangedSubview(feedback)
-        let save = NSButton(title: "保存", target: self, action: #selector(saveSettings)); save.bezelStyle = .rounded
-        save.keyEquivalent = "\r"; save.contentTintColor = .screenClipAccent
-        let cancel = NSButton(title: "取消", target: self, action: #selector(cancelSettings)); cancel.bezelStyle = .rounded
-        cancel.keyEquivalent = "\u{1b}"
-        test.target = self; test.action = #selector(testTranslation); test.bezelStyle = .rounded
-        let speed = NSButton(title: "模型测速…", target: self, action: #selector(openBenchmark)); speed.bezelStyle = .rounded
+
+        let save = PillActionButton(title: "保存", style: .primary(.blue), target: self, action: #selector(saveSettings))
+        save.keyEquivalent = "\r"; save.fixedHeight = 30; save.horizontalPadding = 16
+        let cancel = PillActionButton(title: "取消", style: .subtle, target: self, action: #selector(cancelSettings))
+        cancel.keyEquivalent = "\u{1b}"; cancel.fixedHeight = 30; cancel.horizontalPadding = 14
+        test.target = self; test.action = #selector(testTranslation); test.fixedHeight = 30; test.horizontalPadding = 12
+        let speed = PillActionButton(title: "模型测速…", symbolName: "gauge.with.dots.needle.67percent", style: .tinted(.indigo), target: self, action: #selector(openBenchmark))
+        speed.fixedHeight = 30; speed.horizontalPadding = 11
         let footer = NSStackView(views: [test, speed, NSView(), cancel, save]); footer.alignment = .centerY; footer.spacing = 8
         root.addArrangedSubview(footer)
         for view in root.arrangedSubviews { view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true }
@@ -81,9 +82,38 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
         populateProvider(); resizeToFit(); center()
     }
 
+    private func groupedCard(rows: [NSView]) -> InsetCardView {
+        let card = InsetCardView(radius: 12)
+        populateCard(card, rows: rows)
+        return card
+    }
+
+    private func populateCard(_ card: InsetCardView, rows: [NSView]) {
+        card.translatesAutoresizingMaskIntoConstraints = false
+        let stack = NSStackView()
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12)
+        ])
+        for (index, item) in rows.enumerated() {
+            if index > 0 && index < 2 {
+                let sep = HairlineDivider(vertical: false)
+                stack.addArrangedSubview(sep)
+                sep.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            }
+            stack.addArrangedSubview(item)
+            item.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+    }
+
     private func row(_ title: String, _ field: NSView) -> NSStackView {
-        let label = NSTextField(labelWithString: title); label.font = .systemFont(ofSize: 12); label.textColor = .screenClipSecondaryLabel
-        label.widthAnchor.constraint(equalToConstant: 68).isActive = true
+        let label = NSTextField(labelWithString: title); label.font = .systemFont(ofSize: 12.5, weight: .medium); label.textColor = .screenClipSecondaryLabel
+        label.widthAnchor.constraint(equalToConstant: 64).isActive = true
         let row = NSStackView(views: [label, field]); row.spacing = 12; row.alignment = .centerY
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         return row
@@ -99,7 +129,7 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
         }
     }
     private func populateProvider() {
-        cloudFields.isHidden = currentProvider == .system
+        cloudCard.isHidden = currentProvider == .system
         model.removeAllItems(); model.addItems(withObjectValues: currentProvider.suggestedModels)
         model.stringValue = draft.model(for: currentProvider)
         key.stringValue = keyEdits[currentProvider] ?? ""
@@ -207,9 +237,9 @@ final class TranslationSettingsWindow: NSWindow, NSWindowDelegate, NSComboBoxDel
     }
     private func resizeToFit() {
         contentView?.layoutSubtreeIfNeeded()
-        let height = root.fittingSize.height + 44
+        let height = root.fittingSize.height + 38
         let top = frame.maxY
-        setContentSize(NSSize(width: 460, height: max(200, height)))
+        setContentSize(NSSize(width: 472, height: max(200, height)))
         setFrameOrigin(NSPoint(x: frame.minX, y: top - frame.height))
     }
     func windowWillClose(_ notification: Notification) {

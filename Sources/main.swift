@@ -2,6 +2,7 @@ import AppKit
 import Carbon
 import CoreGraphics
 import OSLog
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -21,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let clipboardPaster = ClipboardPaster()
     private var clipboardTarget: ClipboardPasteTarget?
     private var captureMenuItems: [ShortcutAction: NSMenuItem] = [:]
+    private var pinnedSeparatorItem: NSMenuItem?
+    private var togglePinnedItem: NSMenuItem?
+    private var closePinnedItem: NSMenuItem?
     private var recordingShortcut = false
     private lazy var preferences = ShortcutPreferences { [weak self] bindings in
         self?.configureShortcuts(bindings, rollback: true) ?? false
@@ -28,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var priorApplication: NSRunningApplication?
     private var toast: NSPanel?
     private let captureResult = CaptureResultController()
+    private let pinnedImages = PinnedImageManager()
     private var activationObserver: NSObjectProtocol?
     private var permissionAlertVisible = false
     private let logger = Logger(subsystem: "com.local.screenclip", category: "Capture")
@@ -52,7 +57,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureMenuItems[.copy] = add(menu, "截图并复制", #selector(captureSingle))
         captureMenuItems[.scroll] = add(menu, "滚动截图 / 完成", #selector(captureLong))
         captureMenuItems[.translate] = add(menu, "截图翻译", #selector(captureTranslate))
+        captureMenuItems[.pinCapture] = add(menu, "截图并贴图", #selector(capturePin))
+        captureMenuItems[.pinClipboard] = add(menu, "贴出剪贴板图片", #selector(pinClipboardImage))
+        add(menu, "选择图片贴到屏幕…", #selector(pinImageFromFile))
         captureMenuItems[.clipboard] = add(menu, "剪贴板历史", #selector(showClipboard))
+        let pinnedSep = NSMenuItem.separator()
+        menu.addItem(pinnedSep)
+        pinnedSeparatorItem = pinnedSep
+        togglePinnedItem = add(menu, "隐藏全部贴图", #selector(togglePinnedVisibility))
+        closePinnedItem = add(menu, "关闭全部贴图", #selector(closeAllPinnedImages))
         menu.addItem(.separator())
         add(menu, "打开窗口", #selector(showHelp))
         add(menu, "快捷键…", #selector(showShortcuts))
@@ -61,6 +74,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         add(menu, "退出截图助手", #selector(quit))
         item.menu = menu
+        captureResult.onPin = { [weak self] image, region in
+            self?.pinImage(image, region: region)
+        }
+        pinnedImages.onTranslate = { [weak self] image in self?.translateImage(image) }
+        pinnedImages.onNotify = { [weak self] message in self?.showToast(message) }
+        pinnedImages.onChange = { [weak self] in self?.refreshPinnedMenuItems() }
+        refreshPinnedMenuItems()
         let shortcutsOK = configureShortcuts(preferences.bindings, rollback: false)
         logger.notice("Started; shortcuts registered: \(shortcutsOK); screen permission: \(CGPreflightScreenCaptureAccess())")
         TextRecognizer.warmUp()
@@ -106,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             window.onPermission = { [weak self] in self?.requestPermission() }
             window.onTranslationSettings = { [weak self] in self?.showTranslationSettings() }
+            window.onPinImageFile = { [weak self] in self?.pinImageFromFile() }
             window.onLoginItemChange = { [weak self] enabled in
                 guard let self else { return }
                 let change = self.loginItems.setEnabled(enabled)
@@ -186,9 +207,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    private func refreshPinnedMenuItems() {
+        let count = pinnedImages.count
+        let hasPinned = count > 0
+        pinnedSeparatorItem?.isHidden = !hasPinned
+        togglePinnedItem?.isHidden = !hasPinned
+        closePinnedItem?.isHidden = !hasPinned
+        togglePinnedItem?.title = pinnedImages.areHidden ? "显示全部贴图 (\(count))" : "隐藏全部贴图 (\(count))"
+        closePinnedItem?.title = "关闭全部贴图 (\(count))"
+    }
+
     private func performCapture(_ action: ShortcutAction) {
         logger.notice("Capture requested: \(action.rawValue, privacy: .public)")
-        switch action { case .copy: captureSingle(); case .scroll: captureLong(); case .translate: captureTranslate(); case .clipboard: showClipboard() }
+        switch action {
+        case .copy: captureSingle()
+        case .scroll: captureLong()
+        case .translate: captureTranslate()
+        case .pinCapture: capturePin()
+        case .pinClipboard: pinClipboardImage()
+        case .clipboard: showClipboard()
+        }
     }
 
     @objc private func showClipboard() {
@@ -213,6 +251,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case .copiedOnly(let message): self?.showToast(message)
                     case .needsPermission: self?.showPastePermissionNeeded()
                     }
+                }
+            }
+            window.onPinImageData = { [weak self] data in
+                guard let self else { return }
+                self.clipboardTarget = nil
+                do {
+                    _ = try self.pinnedImages.pinFromData(data)
+                } catch {
+                    self.showToast(error.localizedDescription)
                 }
             }
             window.onDismiss = { [weak self] in
@@ -345,9 +392,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         priorApplication?.activate(options: [])
     }
 
-    private func selectRegion(scrolling: Bool, completion: @escaping (CaptureSelection) -> Void) {
+    private func selectRegion(scrolling: Bool, prompt: String? = nil, completion: @escaping (CaptureSelection) -> Void) {
         selecting = true
-        selector.begin(scrolling: scrolling) { [weak self] result in
+        selector.begin(scrolling: scrolling, prompt: prompt) { [weak self] result in
             guard let self else { return }
             self.restoreTarget()
             defer { self.selecting = false }
@@ -378,6 +425,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             guard let image = selected.image else { self.showError(CaptureError.noImage.localizedDescription); return }
             self.translateInPlace(image, region: selected.region)
+        }
+    }
+
+    @objc func capturePin() {
+        guard session == nil else { showToast("请先完成或取消当前滚动截图"); return }
+        guard ready() else { return }
+        selectRegion(scrolling: false, prompt: "框选截图区域，松开后贴到屏幕 · Esc 取消") { [weak self] selected in
+            guard let self else { return }
+            guard let image = selected.image else { self.showError(CaptureError.noImage.localizedDescription); return }
+            self.pinImage(image, region: selected.region)
+        }
+    }
+
+    @objc func pinClipboardImage() {
+        captureResult.close()
+        clipboardPaster.cancel(); clipboardWindow?.dismiss()
+        do {
+            _ = try pinnedImages.pinFromPasteboard(.general)
+        } catch {
+            showToast(error.localizedDescription)
+        }
+    }
+
+    @objc func pinImageFromFile() {
+        captureResult.close()
+        clipboardPaster.cancel(); clipboardWindow?.dismiss()
+        let panel = NSOpenPanel()
+        panel.title = "选择要固定在屏幕上的图片"
+        panel.prompt = "贴到屏幕"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image]
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        var failed: [String] = []
+        for url in panel.urls {
+            do {
+                _ = try pinnedImages.pinFromURL(url)
+            } catch {
+                failed.append(url.lastPathComponent)
+            }
+        }
+        if !failed.isEmpty {
+            showToast("未能打开：\(failed.joined(separator: "、"))")
+        }
+    }
+
+    @objc private func togglePinnedVisibility() {
+        pinnedImages.toggleHideAll()
+    }
+
+    @objc private func closeAllPinnedImages() {
+        pinnedImages.closeAll()
+    }
+
+    private func pinImage(_ image: Raster, region: CaptureRegion?) {
+        do {
+            _ = try pinnedImages.pin(image, region: region)
+        } catch {
+            showError(error.localizedDescription)
         }
     }
 
@@ -417,18 +525,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showToast(_ message: String) {
         toast?.close()
-        let panel = NSPanel(contentRect: CGRect(x: 0, y: 0, width: 390, height: 56),
+        let font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+        let textWidth = ceil((message as NSString).size(withAttributes: [.font: font]).width)
+        let width = min(380, max(164, textWidth + 44))
+        let height: CGFloat = 40
+        let panel = NSPanel(contentRect: CGRect(x: 0, y: 0, width: width, height: height),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false; panel.isOpaque = false; panel.backgroundColor = .clear
-        panel.hidesOnDeactivate = false
+        panel.hidesOnDeactivate = false; panel.hasShadow = true
         panel.ignoresMouseEvents = true; panel.level = .floating
-        let effect = FrostedSurface(frame: CGRect(x: 0, y: 0, width: 390, height: 56), radius: 14)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let effect = FrostedSurface(frame: CGRect(x: 0, y: 0, width: width, height: height), radius: height / 2)
         let label = NSTextField(labelWithString: message)
-        label.font = .systemFont(ofSize: 13, weight: .medium)
-        label.alignment = .center; label.frame = CGRect(x: 10, y: 17, width: 370, height: 22)
+        label.font = font; label.textColor = .labelColor; label.lineBreakMode = .byTruncatingTail
+        label.alignment = .center; label.frame = CGRect(x: 16, y: 11, width: width - 32, height: 18)
         effect.addSubview(label); panel.contentView = effect
         if let screen = NSScreen.main {
-            panel.setFrameOrigin(CGPoint(x: screen.visibleFrame.midX - 195, y: screen.visibleFrame.minY + 60))
+            panel.setFrameOrigin(CGPoint(x: (screen.visibleFrame.midX - width / 2).rounded(), y: screen.visibleFrame.minY + 64))
         }
         panel.orderFrontRegardless(); toast = panel
         Task { [weak self, weak panel] in
@@ -441,12 +554,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         selector.cancel()
         captureResult.close()
+        pinnedImages.closeAll()
         clipboardHistory.stop(); clipboardPaster.cancel()
         Task { await clipboardHistory.flush(); NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
     func applicationWillTerminate(_ notification: Notification) { clipboardHistory.stop() }
-    @objc func quit() { selector.cancel(); captureResult.close(); clipboardHistory.stop(); clipboardPaster.cancel(); clipboardWindow?.close(); session?.cancel(); translationOverlay?.close(); translationWindow?.close(); translationSettingsWindow?.close(); NSApp.terminate(nil) }
+    @objc func quit() { selector.cancel(); captureResult.close(); pinnedImages.closeAll(); clipboardHistory.stop(); clipboardPaster.cancel(); clipboardWindow?.close(); session?.cancel(); translationOverlay?.close(); translationWindow?.close(); translationSettingsWindow?.close(); NSApp.terminate(nil) }
 }
 
 MainActor.assumeIsolated {

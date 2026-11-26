@@ -66,12 +66,12 @@ import AppKit
         toolbar.contentView!.addSubview(system.view)
         system.view.frame = CGRect(x: 4, y: 4, width: 1, height: 1)
         let visible = region.screen.visibleFrame
-        let width = min(540, visible.width - 16)
+        let width = min(560, visible.width - 16)
         let x = min(visible.maxX - width - 8, max(visible.minX + 8, region.rect.midX - width / 2))
         let below = region.rect.minY - toolbar.frame.height - 8
         let above = region.rect.maxY + 8
         let y = below >= visible.minY + 8 ? below : min(visible.maxY - toolbar.frame.height - 8, max(visible.minY + 8, above))
-        toolbar.setFrame(CGRect(x: x, y: y, width: width, height: 64), display: true)
+        toolbar.setFrame(CGRect(x: x, y: y, width: width, height: 56), display: true)
         if present {
             NSApp.activate(ignoringOtherApps: true)
             focusBackdrops.forEach { $0.orderFrontRegardless() }
@@ -162,44 +162,56 @@ import AppKit
 @MainActor final class OverlayToolbar: OverlayPanel {
     let status = NSTextField(wrappingLabelWithString: "")
     let spinner = NSProgressIndicator()
-    let originalButton = NSButton(title: "查看原文", target: nil, action: nil)
-    let copyOriginalButton = NSButton(title: "复制原文", target: nil, action: nil)
-    let copyButton = NSButton(title: "复制译文", target: nil, action: nil)
-    let retryButton = NSButton(title: "重试", target: nil, action: nil)
+    let originalButton = PillActionButton(title: "查看原文", style: .subtle)
+    let copyOriginalButton = PillActionButton(title: "复制原文", style: .subtle)
+    let copyButton = PillActionButton(title: "复制译文", symbolName: "doc.on.doc", style: .primary(.blue))
+    let retryButton = PillActionButton(title: "重试", symbolName: "arrow.clockwise", style: .tinted(.amber))
     var onOriginal: (() -> Void)?, onCopyOriginal: (() -> Void)?, onCopy: (() -> Void)?, onRetry: (() -> Void)?, onSettings: (() -> Void)?
 
     init() {
-        super.init(contentRect: CGRect(x: 0, y: 0, width: 540, height: 64), styleMask: [.borderless], backing: .buffered, defer: false)
+        super.init(contentRect: CGRect(x: 0, y: 0, width: 560, height: 56), styleMask: [.borderless], backing: .buffered, defer: false)
         title = "翻译工具栏"; hasShadow = true
-        let effect = FrostedSurface(radius: 14)
+        let effect = FrostedSurface(radius: 22)
         contentView = effect
         let row = NSStackView(); row.orientation = .horizontal; row.distribution = .fill
-        row.spacing = 7; row.alignment = .centerY
+        row.spacing = 6; row.alignment = .centerY
         row.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(row)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 12),
-            row.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -12),
+            row.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 14),
+            row.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -10),
             row.centerYAnchor.constraint(equalTo: effect.centerYAnchor)
         ])
         spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
-        spinner.widthAnchor.constraint(equalToConstant: 16).isActive = true
-        spinner.heightAnchor.constraint(equalToConstant: 16).isActive = true
-        status.font = .systemFont(ofSize: 12); status.maximumNumberOfLines = 3
+        spinner.widthAnchor.constraint(equalToConstant: 15).isActive = true
+        spinner.heightAnchor.constraint(equalToConstant: 15).isActive = true
+        status.font = .systemFont(ofSize: 12, weight: .medium); status.maximumNumberOfLines = 2
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         status.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let settings = NSButton(image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "翻译设置")!, target: self, action: #selector(settingsAction))
-        let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "关闭原位翻译")!, target: self, action: #selector(closeAction))
+
+        let divider = HairlineDivider(vertical: true)
+        divider.heightAnchor.constraint(equalToConstant: 20).isActive = true
+
+        let settings = PillActionButton(symbolName: "gearshape", style: .iconCircle, target: self, action: #selector(settingsAction))
+        let close = PillActionButton(symbolName: "xmark", style: .iconCircle, target: self, action: #selector(closeAction))
+        settings.fixedHeight = 28; close.fixedHeight = 28
+        settings.setAccessibilityLabel("翻译设置"); close.setAccessibilityLabel("关闭原位翻译")
         settings.toolTip = "翻译设置"; close.toolTip = "关闭（Esc）"
+
         originalButton.setButtonType(.toggle)
-        for button in [originalButton, copyOriginalButton, copyButton, retryButton, settings, close] {
-            button.bezelStyle = .rounded; button.controlSize = .small; button.font = .systemFont(ofSize: 12)
-            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        originalButton.showsToggleState = true
+        for button in [originalButton, copyOriginalButton, copyButton, retryButton] {
+            button.fixedHeight = 30
+            button.horizontalPadding = 10
         }
         originalButton.target = self; originalButton.action = #selector(originalAction)
         copyOriginalButton.target = self; copyOriginalButton.action = #selector(copyOriginalAction)
         copyButton.target = self; copyButton.action = #selector(copyAction)
         retryButton.target = self; retryButton.action = #selector(retryAction)
-        for view in [spinner, status, retryButton, originalButton, copyOriginalButton, copyButton, settings, close] { row.addArrangedSubview(view) }
+        for view in [spinner, status, divider, retryButton, originalButton, copyOriginalButton, copyButton, settings, close] {
+            row.addArrangedSubview(view)
+        }
+        row.setCustomSpacing(8, after: status)
+        row.setCustomSpacing(8, after: divider)
     }
     @objc private func originalAction() { onOriginal?() }
     @objc private func copyOriginalAction() { onCopyOriginal?() }

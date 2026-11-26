@@ -101,6 +101,8 @@ struct ShortcutTests {
             .copy: Shortcut(keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey | shiftKey), keyLabel: "A"),
             .scroll: Shortcut(keyCode: UInt32(kVK_ANSI_W), modifiers: UInt32(cmdKey | shiftKey), keyLabel: "W"),
             .translate: custom,
+            .pinCapture: Shortcut.defaults[.pinCapture]!,
+            .pinClipboard: Shortcut.defaults[.pinClipboard]!,
             .clipboard: Shortcut.defaults[.clipboard]!
         ]
         window.update(bindings: userBindings, permissionGranted: true)
